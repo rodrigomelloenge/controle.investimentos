@@ -1,0 +1,3478 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+// GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`.
+"use strict";
+(() => {
+  var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
+  // src/react.ts
+  function getReact() {
+    const R = window.React;
+    if (!R) throw new Error("dc-runtime: window.React is not available yet");
+    return R;
+  }
+  function getReactDOM() {
+    const RD = window.ReactDOM;
+    if (!RD) throw new Error("dc-runtime: window.ReactDOM is not available yet");
+    return RD;
+  }
+  var h = ((...args) => getReact().createElement(
+    ...args
+  ));
+
+  // src/parse.ts
+  function parseDcDocument(doc) {
+    const dc = doc.querySelector("x-dc");
+    if (!dc) return null;
+    const scriptEl = doc.querySelector("script[data-dc-script]");
+    const { props, preview } = parseDataProps(
+      scriptEl?.getAttribute("data-props") ?? null
+    );
+    return {
+      template: dc.innerHTML,
+      js: scriptEl ? scriptEl.textContent || "" : "",
+      props,
+      preview
+    };
+  }
+  function parseDcText(src) {
+    const openMatch = /<x-dc(?:\s[^>]*)?>/.exec(src);
+    if (!openMatch) return null;
+    const close = src.lastIndexOf("</x-dc>");
+    if (close === -1 || close < openMatch.index) return null;
+    const template = src.slice(openMatch.index + openMatch[0].length, close);
+    const doc = new DOMParser().parseFromString(src, "text/html");
+    const scriptEl = doc.querySelector("script[data-dc-script]");
+    const { props, preview } = parseDataProps(
+      scriptEl?.getAttribute("data-props") ?? null
+    );
+    return {
+      template,
+      js: scriptEl ? scriptEl.textContent || "" : "",
+      props,
+      preview
+    };
+  }
+  function parseDataProps(raw) {
+    if (!raw) return { props: null, preview: null };
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { props: null, preview: null };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { props: null, preview: null };
+    }
+    const obj = parsed;
+    const preview = obj.$preview && typeof obj.$preview === "object" ? obj.$preview : null;
+    const rest = {};
+    for (const k of Object.keys(obj)) {
+      if (k[0] !== "$") rest[k] = obj[k];
+    }
+    return { props: Object.keys(rest).length ? rest : null, preview };
+  }
+  function dcNameFromPath(pathname) {
+    let p = pathname || "";
+    try {
+      p = decodeURIComponent(p);
+    } catch {
+    }
+    const base = p.split("/").pop() || "Root";
+    return base.replace(/\.dc\.html$/, "").replace(/\.html?$/, "") || "Root";
+  }
+
+  // src/boot.ts
+  var BASE_CSS = `
+    .sc-placeholder{background:color-mix(in srgb,currentColor 8%,transparent);
+      border:1px solid color-mix(in srgb,currentColor 50%,transparent);
+      border-radius:2px;box-sizing:border-box;overflow:hidden}
+    @keyframes sc-shine{0%{background-position:100% 50%}100%{background-position:0% 50%}}
+    html.sc-dc-streaming .sc-placeholder,
+    html.sc-dc-streaming .sc-interp.sc-missing{position:relative;
+      background:color-mix(in srgb,currentColor 5%,transparent);
+      border-color:transparent}
+    html.sc-dc-streaming .sc-placeholder::before,
+    html.sc-dc-streaming .sc-interp.sc-missing::before{content:'';
+      position:absolute;inset:0;pointer-events:none;
+      background:linear-gradient(90deg,rgba(217,119,87,0) 25%,rgba(247,225,211,.95) 37%,rgba(217,119,87,0) 63%);
+      background-size:400% 100%;animation:sc-shine 1.4s ease infinite}
+    html.sc-dc-streaming .sc-placeholder:nth-child(n+9 of .sc-placeholder)::before,
+    html.sc-dc-streaming .sc-interp.sc-missing:nth-child(n+9 of .sc-interp.sc-missing)::before{animation:none;
+      background:color-mix(in srgb,currentColor 8%,transparent)}
+    .sc-placeholder-error{padding:4px 8px;font:11px/1.4 ui-monospace,monospace;
+      color:color-mix(in srgb,currentColor 70%,transparent);word-break:break-word}
+    .sc-interp.sc-missing{display:inline-block;width:2em;height:1em;overflow:hidden;
+      vertical-align:text-bottom;background:rgba(255,255,255,.3);border:1px solid rgba(0,0,0,.5);
+      border-radius:2px;box-sizing:border-box;color:transparent;
+      user-select:none}
+    .sc-interp.sc-unresolved{font-family:ui-monospace,monospace;font-size:.85em;
+      color:color-mix(in srgb,currentColor 50%,transparent);
+      background:color-mix(in srgb,currentColor 10%,transparent);border-radius:3px;
+      padding:0 3px}
+    .sc-host.sc-has-error{position:relative}
+    .sc-logic-error{position:absolute;top:8px;left:8px;z-index:2147483647;max-width:60ch;
+      padding:6px 10px;background:#b00020;color:#fff;font:12px/1.4 ui-monospace,monospace;
+      border-radius:4px;white-space:pre-wrap;pointer-events:none}
+    /* Mirrors PRINT_BASELINE_CSS in apps/web deck-stage-export.ts \u2014 keep both
+       in sync until dc-runtime regains a build step. */
+    @media print {
+      @page { margin: 0.5cm; }
+      figure, table { break-inside: avoid; }
+      #dc-root, #dc-root > .sc-host { height: auto; }
+      *, *::before, *::after {
+        print-color-adjust: exact; -webkit-print-color-adjust: exact;
+        backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+        animation-delay: -99s !important; animation-duration: .001s !important;
+        animation-iteration-count: 1 !important; animation-fill-mode: both !important;
+        animation-play-state: running !important; transition-duration: 0s !important;
+      }
+    }
+  `;
+  var FULL_PAGE_CSS = "html,body{height:100%;margin:0}#dc-root,#dc-root>.sc-host{height:100%}";
+  function rootNameForDocument(doc, loc) {
+    let bootPath = loc.pathname || "";
+    if (!/\.dc\.html?$/i.test(safeDecode(bootPath))) {
+      try {
+        bootPath = new URL(doc.baseURI || "/").pathname;
+      } catch {
+      }
+    }
+    return dcNameFromPath(bootPath);
+  }
+  function safeDecode(s) {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  }
+  function boot(runtime, doc = document) {
+    const parsed = parseDcDocument(doc);
+    if (!parsed) return null;
+    const React = getReact();
+    const rootName = rootNameForDocument(doc, location);
+    runtime.markFetched(rootName);
+    runtime.setRootName(rootName);
+    runtime.adoptParsed(rootName, parsed);
+    fetch(location.href).then((res) => res.ok ? res.text() : "").then((t) => {
+      const raw = t ? parseDcText(t) : null;
+      if (raw?.template) runtime.updateHtml(rootName, raw.template);
+    }).catch(() => {
+    });
+    const dc = doc.querySelector("x-dc");
+    const hostEl = doc.createElement("div");
+    hostEl.id = "dc-root";
+    dc.replaceWith(hostEl);
+    if (!parsed.preview) {
+      const s = doc.createElement("style");
+      s.textContent = FULL_PAGE_CSS;
+      doc.head.appendChild(s);
+    }
+    const Root = runtime.getDC(rootName);
+    const entry = runtime.registry.get(rootName);
+    function StandaloneRoot() {
+      const [, setTick] = React.useState(0);
+      React.useEffect(() => {
+        const sub = () => setTick((n) => n + 1);
+        entry.subs.add(sub);
+        return () => {
+          entry.subs.delete(sub);
+        };
+      }, []);
+      const defaults = React.useMemo(() => {
+        const d = {};
+        for (const k in entry.propsMeta || {}) {
+          const v = entry.propsMeta?.[k]?.default;
+          if (v !== void 0) d[k] = v;
+        }
+        return d;
+      }, [entry.propsMeta]);
+      return h(Root, { ...defaults, ...entry.propOverrides || {} });
+    }
+    const ReactDOM = getReactDOM();
+    if (ReactDOM.createRoot)
+      ReactDOM.createRoot(hostEl).render(h(StandaloneRoot));
+    else ReactDOM.render(h(StandaloneRoot), hostEl);
+    return rootName;
+  }
+
+  // src/expr.ts
+  var IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+  var NUMBER_RE = /^-?\d+(\.\d+)?$/;
+  function resolve(vals, src) {
+    const expr = String(src).trim();
+    if (!expr) return void 0;
+    if (expr[0] === "(" && expr[expr.length - 1] === ")" && parensWrapWhole(expr)) {
+      return resolve(vals, expr.slice(1, -1));
+    }
+    const eq = findTopLevelEquality(expr);
+    if (eq) {
+      const lv = resolve(vals, expr.slice(0, eq.index));
+      const rv = resolve(vals, expr.slice(eq.index + eq.op.length));
+      switch (eq.op) {
+        case "===":
+          return lv === rv;
+        case "!==":
+          return lv !== rv;
+        case "==":
+          return lv == rv;
+        default:
+          return lv != rv;
+      }
+    }
+    if (expr[0] === "!") return !resolve(vals, expr.slice(1));
+    if (expr === "true") return true;
+    if (expr === "false") return false;
+    if (expr === "null") return null;
+    if (expr === "undefined") return void 0;
+    if (NUMBER_RE.test(expr)) return Number(expr);
+    if (expr.length >= 2 && (expr[0] === '"' || expr[0] === "'") && expr[expr.length - 1] === expr[0]) {
+      return expr.slice(1, -1);
+    }
+    return resolvePath(vals, expr);
+  }
+  function parensWrapWhole(expr) {
+    let depth = 0;
+    for (let i = 0; i < expr.length - 1; i++) {
+      if (expr[i] === "(") depth++;
+      else if (expr[i] === ")") {
+        depth--;
+        if (depth === 0) return false;
+      }
+    }
+    return true;
+  }
+  function findTopLevelEquality(expr) {
+    let depth = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const c = expr[i];
+      if (c === "[" || c === "(") depth++;
+      else if (c === "]" || c === ")") depth--;
+      else if (depth === 0 && (c === "=" || c === "!") && expr[i + 1] === "=") {
+        if (i > 0 && (expr[i - 1] === "=" || expr[i - 1] === "!")) continue;
+        if (!expr.slice(0, i).trim()) continue;
+        const op = expr[i + 2] === "=" ? c + "==" : c + "=";
+        return { index: i, op };
+      }
+    }
+    return null;
+  }
+  function resolvePath(vals, expr) {
+    const head = expr.match(IDENT_RE);
+    if (!head) return void 0;
+    let cur = vals == null ? void 0 : vals[head[0]];
+    let i = head[0].length;
+    while (i < expr.length) {
+      if (expr[i] === ".") {
+        const m = expr.slice(i + 1).match(IDENT_RE) || expr.slice(i + 1).match(/^\d+/);
+        if (!m) return void 0;
+        cur = cur == null ? void 0 : cur[m[0]];
+        i += 1 + m[0].length;
+      } else if (expr[i] === "[") {
+        let depth = 1;
+        let j = i + 1;
+        while (j < expr.length && depth > 0) {
+          if (expr[j] === "[") depth++;
+          else if (expr[j] === "]") {
+            depth--;
+            if (depth === 0) break;
+          }
+          j++;
+        }
+        if (depth !== 0) return void 0;
+        const key = resolve(vals, expr.slice(i + 1, j));
+        cur = cur == null ? void 0 : cur[key];
+        i = j + 1;
+      } else {
+        return void 0;
+      }
+    }
+    return cur;
+  }
+
+  // src/encode.ts
+  var CAMEL_ATTR = "sc-camel-";
+  var INLINE_TEXT_TAGS = new Set(
+    "a abbr b bdi bdo br cite code del dfn em i ins kbd mark q s samp small span strike strong sub sup u var wbr".split(
+      " "
+    )
+  );
+  var RAW_WRAP = {
+    select: "sc-raw-select",
+    table: "sc-raw-table",
+    tbody: "sc-raw-tbody",
+    thead: "sc-raw-thead",
+    tfoot: "sc-raw-tfoot",
+    tr: "sc-raw-tr",
+    td: "sc-raw-td",
+    th: "sc-raw-th",
+    caption: "sc-raw-caption"
+  };
+  var RAW_UNWRAP = Object.fromEntries(
+    Object.entries(RAW_WRAP).map(([k, v]) => [v, k])
+  );
+  var EVENT_MAP = {
+    onclick: "onClick",
+    onchange: "onChange",
+    oninput: "onInput",
+    onsubmit: "onSubmit",
+    onkeydown: "onKeyDown",
+    onkeyup: "onKeyUp",
+    onkeypress: "onKeyPress",
+    onmousedown: "onMouseDown",
+    onmouseup: "onMouseUp",
+    onmouseenter: "onMouseEnter",
+    onmouseleave: "onMouseLeave",
+    onfocus: "onFocus",
+    onblur: "onBlur",
+    ondoubleclick: "onDoubleClick",
+    oncontextmenu: "onContextMenu"
+  };
+  var ATTRS = `(?:[^>"']|"[^"]*"|'[^']*')*`;
+  var IMPORT_SELF_CLOSE_RE = new RegExp(
+    "<(x-import|dc-import)(" + ATTRS + ")/>",
+    "gi"
+  );
+  var CAMEL_ATTR_RE = /(\s)([a-z]+[A-Z][A-Za-z0-9]*)(\s*=)/g;
+  function encodeCase(html) {
+    html = html.replace(
+      IMPORT_SELF_CLOSE_RE,
+      (_, t, a) => "<" + t + a + "></" + t + ">"
+    );
+    html = html.replace(/<helmet(\s|>)/gi, "<sc-helmet$1");
+    html = html.replace(/<\/helmet\s*>/gi, "</sc-helmet>");
+    html = html.replace(
+      CAMEL_ATTR_RE,
+      (_, sp, name, eq) => sp + CAMEL_ATTR + name.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()) + eq
+    );
+    for (const [real, alias] of Object.entries(RAW_WRAP)) {
+      html = html.replace(
+        new RegExp("(</?)" + real + "(?=[\\s>])", "gi"),
+        "$1" + alias
+      );
+    }
+    return html;
+  }
+  function kebabToCamel(s) {
+    return s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  }
+  function cssToObj(css) {
+    const o = {};
+    for (const decl of css.split(";")) {
+      const i = decl.indexOf(":");
+      if (i < 0) continue;
+      const prop = decl.slice(0, i).trim();
+      o[prop.startsWith("--") ? prop : kebabToCamel(prop)] = decl.slice(i + 1).trim();
+    }
+    return o;
+  }
+  function compileAttr(raw) {
+    const whole = raw.match(/^\s*\{\{([\s\S]+?)\}\}\s*$/);
+    if (whole) {
+      const path = whole[1];
+      return (vals) => resolve(vals, path);
+    }
+    if (raw.includes("{{")) {
+      const parts = raw.split(/\{\{([\s\S]+?)\}\}/g);
+      return (vals) => parts.map((s, i) => i & 1 ? resolve(vals, s) ?? "" : s).join("");
+    }
+    return () => raw;
+  }
+
+  // src/compile.ts
+  function collectProps(node, kind, host) {
+    const propGetters = [];
+    const pseudoClasses = [];
+    let hintSize = null;
+    for (const { name, value } of [...node.attributes]) {
+      if (name === "sc-name" || name === "data-dc-tpl") continue;
+      let key = name;
+      if (key.startsWith(CAMEL_ATTR))
+        key = kebabToCamel(key.slice(CAMEL_ATTR.length));
+      if (key === "hint-size") {
+        hintSize = value;
+        continue;
+      }
+      if (key.startsWith("style-")) {
+        pseudoClasses.push(host.pseudoClass(key.slice(6), value));
+        continue;
+      }
+      if (kind !== "dom") {
+        if (key.includes("-") && !(kind === "x-import" && (key.startsWith("aria-") || key.startsWith("data-"))))
+          key = kebabToCamel(key);
+      } else {
+        if (key === "class") key = "className";
+        else if (key === "for") key = "htmlFor";
+        else if (key.startsWith("on"))
+          key = EVENT_MAP[key] || "on" + key[2].toUpperCase() + key.slice(3);
+      }
+      propGetters.push([key, compileAttr(value)]);
+    }
+    return { propGetters, pseudoClasses, hintSize };
+  }
+  var HOST_STYLE_PROPS = /* @__PURE__ */ new Set([
+    "position",
+    "left",
+    "right",
+    "top",
+    "bottom",
+    "inset",
+    "width",
+    "height",
+    "z-index",
+    "transform"
+  ]);
+  function hostPositionStyle(style) {
+    const all = typeof style === "string" ? cssToObj(style) : style != null && typeof style === "object" ? style : null;
+    if (!all) return void 0;
+    const out = {};
+    for (const [k, v] of Object.entries(all)) {
+      const kebab = k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+      if (HOST_STYLE_PROPS.has(kebab)) out[k] = v;
+    }
+    return Object.keys(out).length ? out : void 0;
+  }
+  function compileTemplate(html, host) {
+    const tpl = document.createElement("template");
+    //! nosemgrep: direct-inner-html-assignment
+    tpl.innerHTML = encodeCase(html);
+    let tplN = 0;
+    (function stamp(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        node.setAttribute("data-dc-tpl", String(tplN++));
+      }
+      for (const c of node.childNodes) stamp(c);
+    })(tpl.content);
+    const builders = walkChildren(tpl.content, host);
+    const render = ((vals, ctx) => builders.map((b, i) => b(vals || {}, ctx, i)));
+    render.__annotated = tpl.innerHTML;
+    return render;
+  }
+  function walkChildren(node, host) {
+    return [...node.childNodes].map((c) => walk(c, host)).filter((b) => b != null);
+  }
+  function walk(node, host) {
+    if (node.nodeType === Node.TEXT_NODE) return walkText(node);
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+    const el = node;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "sc-for") return walkFor(el, host);
+    if (tag === "sc-if") return walkIf(el, host);
+    if (tag === "x-import") return walkXImport(el, host);
+    if (tag === "sc-helmet") return host.helmet(el);
+    if (tag === "dc-import") return walkComponent(el, host);
+    return walkElement(el, host);
+  }
+  var warnedHoles = /* @__PURE__ */ new Set();
+  function warnUnresolved(ctx, what) {
+    const key = (ctx?.__name || "?") + "\0" + what;
+    if (warnedHoles.has(key)) return;
+    warnedHoles.add(key);
+    console.warn("[dc-runtime] " + (ctx?.__name || "template") + ": " + what);
+  }
+  function walkText(node) {
+    const txt = node.nodeValue ?? "";
+    if (!txt.includes("{{")) {
+      if (!txt.trim() && !txt.includes(" ")) return null;
+      return () => txt;
+    }
+    const parts = txt.split(/\{\{([\s\S]+?)\}\}/g);
+    return (vals, ctx, key) => h(
+      getReact().Fragment,
+      { key },
+      ...parts.map((p, i) => {
+        if (!(i & 1)) return p;
+        const v = resolve(vals, p);
+        if (v === void 0) {
+          if (!ctx?.__streamingNow) {
+            if (document.body?.hasAttribute("data-dc-editor-on")) {
+              return h(
+                "span",
+                { key: i, className: "sc-interp sc-unresolved" },
+                "{{ " + p.trim() + " }}"
+              );
+            }
+            warnUnresolved(
+              ctx,
+              "{{ " + p.trim() + " }} never resolved \u2014 rendered as empty"
+            );
+            return null;
+          }
+          return h(
+            "span",
+            { key: i, className: "sc-interp sc-missing" },
+            p.trim()
+          );
+        }
+        if (getReact().isValidElement(v) || Array.isArray(v)) {
+          return h(getReact().Fragment, { key: i }, v);
+        }
+        if (v === null || typeof v === "boolean") return null;
+        return h("span", { key: i, className: "sc-interp" }, String(v));
+      })
+    );
+  }
+  function walkFor(el, host) {
+    const listGet = compileAttr(el.getAttribute("list") || "");
+    const asName = el.getAttribute("as") || "item";
+    const hintN = parseInt(el.getAttribute("hint-placeholder-count") || "0", 10);
+    const kids = walkChildren(el, host);
+    const listSrc = el.getAttribute("list") || "";
+    return (vals, ctx, key) => {
+      let list = listGet(vals);
+      if (!Array.isArray(list)) {
+        if (!ctx?.__streamingNow) {
+          if (list !== void 0 && list !== null) {
+            warnUnresolved(
+              ctx,
+              'sc-for list="' + listSrc + '" is not an array (' + typeof list + ")"
+            );
+          }
+          list = [];
+        } else {
+          list = hintN > 0 ? Array(hintN).fill(void 0) : [];
+        }
+      }
+      return h(
+        getReact().Fragment,
+        { key },
+        list.map((item, i) => {
+          const sub = { ...vals, [asName]: item, $index: i };
+          return h(
+            getReact().Fragment,
+            { key: i },
+            kids.map((b, j) => b(sub, ctx, j))
+          );
+        })
+      );
+    };
+  }
+  function walkIf(el, host) {
+    const valGet = compileAttr(el.getAttribute("value") || "");
+    const hintRaw = el.getAttribute("hint-placeholder-val");
+    const hintGet = hintRaw != null ? compileAttr(hintRaw) : null;
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      let v = valGet(vals);
+      if (v === void 0 && hintGet && ctx?.__streamingNow) v = hintGet(vals);
+      return v ? h(
+        getReact().Fragment,
+        { key },
+        kids.map((b, j) => b(vals, ctx, j))
+      ) : null;
+    };
+  }
+  function walkComponent(el, host) {
+    const name = el.getAttribute("name") || el.getAttribute("component") || "";
+    el.removeAttribute("name");
+    el.removeAttribute("component");
+    const tplId = el.getAttribute("data-dc-tpl");
+    const styleRaw = el.getAttribute("style");
+    el.removeAttribute("style");
+    const styleGet = styleRaw != null ? compileAttr(styleRaw) : null;
+    const { propGetters, hintSize } = collectProps(el, "dc-import", host);
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      const props = {
+        key,
+        __hintSize: hintSize,
+        __tplId: tplId,
+        __hostStyle: styleGet ? hostPositionStyle(styleGet(vals)) : void 0
+      };
+      for (const [k, g] of propGetters) {
+        const v = g(vals);
+        if (k === "dcProps") {
+          if (v && typeof v === "object") Object.assign(props, v);
+          continue;
+        }
+        props[k] = v;
+      }
+      if (kids.length) props.children = kids.map((b, j) => b(vals, ctx, j));
+      return h(host.component(name), props);
+    };
+  }
+  function walkXImport(el, host) {
+    const globalNameGet = compileAttr(
+      el.getAttribute("component-from-global-scope") || ""
+    );
+    const exportNameGet = compileAttr(
+      el.getAttribute("component") || el.getAttribute("name") || ""
+    );
+    const fromRaw = el.getAttribute("from") || el.getAttribute("src") || el.getAttribute("import") || "";
+    const urls = fromRaw.trim() ? fromRaw.trim().split(/\s+/) : [];
+    const url = urls.length ? urls[urls.length - 1] : "";
+    const kindOf = (u) => /\.(jsx|tsx)(\?|#|$)/i.test(u) ? "jsx" : "js";
+    const tplId = el.getAttribute("data-dc-tpl");
+    const styleRaw = el.getAttribute("style");
+    el.removeAttribute("style");
+    const styleGet = styleRaw != null ? compileAttr(styleRaw) : null;
+    const wrap = tplId != null || styleGet != null;
+    const { propGetters, hintSize } = collectProps(el, "x-import", host);
+    const hasContent = el.children.length > 0 || !!(el.textContent || "").trim();
+    const kids = hasContent ? walkChildren(el, host) : [];
+    const urlBindable = fromRaw.includes("{{");
+    if (urls.length && !urlBindable) {
+      let prev;
+      for (const u of urls) prev = host.loadExternal(kindOf(u), u, prev);
+    }
+    const evalName = (g, vals) => {
+      const v = g(vals);
+      const s = v == null ? "" : String(v);
+      return s.includes("{{") ? "" : s;
+    };
+    return (vals, ctx, key) => {
+      const globalName = evalName(globalNameGet, vals);
+      const name = globalName || evalName(exportNameGet, vals);
+      const C = !name || urlBindable ? null : globalName ? host.resolveExternalGlobal(url, globalName) : host.resolveExternal(url, name);
+      const hostStyle = styleGet ? hostPositionStyle(styleGet(vals)) : void 0;
+      const wrapper = wrap ? {
+        key,
+        className: "sc-host-x",
+        "data-dc-tpl": tplId,
+        style: hostStyle || { display: "contents" }
+      } : null;
+      if (!C) {
+        const error = urlBindable ? "x-import `from` cannot contain {{ \u2026 }} \u2014 module URLs are resolved at parse time; use a literal URL" : host.resolveExternalError(url, name);
+        const ph = host.placeholder({
+          key: wrapper ? void 0 : key,
+          name,
+          hintSize,
+          error
+        });
+        return wrapper ? h("div", wrapper, ph) : ph;
+      }
+      const props = wrapper ? {} : { key };
+      let unresolvedHole = false;
+      for (const [k, g] of propGetters) {
+        if (k === "component" || k === "componentFromGlobalScope" || k === "from") {
+          continue;
+        }
+        const v = g(vals);
+        if (v === void 0) unresolvedHole = true;
+        if (k === "dcProps") {
+          if (v && typeof v === "object") Object.assign(props, v);
+          continue;
+        }
+        props[k] = v;
+      }
+      if (unresolvedHole && ctx?.__htmlStreamingNow) {
+        const ph = host.placeholder({
+          key: wrapper ? void 0 : key,
+          name,
+          hintSize,
+          error: null
+        });
+        return wrapper ? h("div", wrapper, ph) : ph;
+      }
+      if (kids.length) props.children = kids.map((b, j) => b(vals, ctx, j));
+      return wrapper ? h("div", wrapper, h(C, props)) : h(C, props);
+    };
+  }
+  function contentKey(el) {
+    const clone = el.cloneNode(true);
+    for (const d of clone.querySelectorAll("*")) {
+      while (d.attributes.length) d.removeAttribute(d.attributes[0].name);
+    }
+    const s = clone.innerHTML;
+    let h2 = 5381;
+    for (let i = 0; i < s.length; i++) h2 = (h2 << 5) + h2 + s.charCodeAt(i) | 0;
+    return s.length + "." + (h2 >>> 0).toString(36);
+  }
+  var NEVER_CONTENT_KEYED = new Set(
+    "script style textarea option title select canvas iframe video audio".split(
+      " "
+    )
+  );
+  var NOT_INLINE_SELECTOR = ":not(" + [...INLINE_TEXT_TAGS].join(",") + ")";
+  function walkElement(el, host) {
+    const realTag = RAW_UNWRAP[el.localName] || el.localName;
+    const tplId = el.getAttribute("data-dc-tpl");
+    const inlineOnly = el.childNodes.length > 0 && !NEVER_CONTENT_KEYED.has(realTag) && el.querySelector(NOT_INLINE_SELECTOR) === null;
+    const keySuffix = inlineOnly ? "|" + contentKey(el) : "";
+    const { propGetters, pseudoClasses } = collectProps(el, "dom", host);
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      const props = {
+        key: key + keySuffix,
+        "data-dc-tpl": tplId
+      };
+      for (const [k, g] of propGetters) {
+        let v = g(vals);
+        if (k === "style" && typeof v === "string") v = cssToObj(v);
+        if ((k === "value" || k === "checked") && v === void 0) {
+          v = k === "checked" ? false : "";
+        }
+        props[k] = v;
+      }
+      if (pseudoClasses.length) {
+        props.className = [props.className, ...pseudoClasses].filter(Boolean).join(" ");
+      }
+      return h(realTag, props, ...kids.map((b, j) => b(vals, ctx, j)));
+    };
+  }
+
+  // src/logic.ts
+  var StreamableLogic = class {
+    constructor(props) {
+      __publicField(this, "props");
+      __publicField(this, "state", {});
+      /** Back-pointer to the wrapper component, installed after construction. */
+      __publicField(this, "__host");
+      this.props = props || {};
+    }
+    setState(update, cb) {
+      this.__host && this.__host.__setLogicState(update, cb);
+    }
+    forceUpdate() {
+      this.__host && this.__host.forceUpdate();
+    }
+    componentDidMount() {
+    }
+    componentDidUpdate(_prevProps) {
+    }
+    componentWillUnmount() {
+    }
+    /** The flat object the template renders against (merged over props). */
+    renderVals() {
+      return {};
+    }
+  };
+  function evalDcLogic(src) {
+    //! nosemgrep: eval-and-function-constructor
+    const fn = new Function(
+      "DCLogic",
+      "StreamableLogic",
+      "React",
+      src + '\n;return (typeof Component!=="undefined"&&Component)||undefined;'
+    );
+    return fn(StreamableLogic, StreamableLogic, getReact());
+  }
+
+  // src/component.ts
+  function shallowEqual(a, b) {
+    if (!b) return false;
+    const ak = Object.keys(a).filter((k) => k !== "children");
+    const bk = Object.keys(b).filter((k) => k !== "children");
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) if (a[k] !== b[k]) return false;
+    return true;
+  }
+  function Placeholder({
+    name,
+    hintSize,
+    streaming,
+    error
+  }) {
+    const [w, hgt] = (hintSize || "100%,60px").split(",");
+    return h(
+      "div",
+      {
+        className: "sc-placeholder" + (streaming ? " sc-streaming" : ""),
+        style: { width: w.trim(), height: hgt && hgt.trim() },
+        title: name
+      },
+      error ? h(
+        "div",
+        { className: "sc-placeholder-error" },
+        (name ? name + ": " : "") + error
+      ) : null
+    );
+  }
+  function hintToMin(hint) {
+    if (!hint) return void 0;
+    const [w, hgt] = hint.split(",");
+    return { minWidth: w.trim(), minHeight: hgt && hgt.trim() };
+  }
+  function createComponentFactory(registry, ensureFetched) {
+    const React = getReact();
+    const AncestorContext = React.createContext([]);
+    class StreamableComponent extends React.Component {
+      constructor(props) {
+        super(props);
+        __publicField(this, "__name");
+        __publicField(this, "__sub");
+        __publicField(this, "__needsDidMount", false);
+        /** Snapshot of the registry's streaming flags taken at render time —
+         *  builders read it off the RenderCtx (this) to pick placeholder vs
+         *  render-nothing for unresolved values. */
+        __publicField(this, "__streamingNow", false);
+        __publicField(this, "__htmlStreamingNow", false);
+        /** When a construct throws, remember the (class, registry.ver, props)
+         *  triple so render-time reconcile doesn't re-attempt it on every parent
+         *  re-render. A registry bump (new class, template, external module
+         *  resolving via bumpAll) changes `ver` and breaks the memo so an
+         *  env-dependent constructor can self-heal. */
+        __publicField(this, "__failedLogic", null);
+        __publicField(this, "__failedUserProps", null);
+        __publicField(this, "__failedVer", -1);
+        /** Per-instance constructor error — kept here (not on the registry entry)
+         *  so one instance's successful construct can't hide a sibling's failure,
+         *  and a construct can never wipe an eval error `updateJs` recorded on
+         *  `r.logicError`. */
+        __publicField(this, "__ctorError", null);
+        __publicField(this, "logic");
+        this.__name = props.__name;
+        this.state = { __v: 0, __err: null };
+        this.__sub = () => {
+          if (this.state.__err) this.setState({ __err: null });
+          this.forceUpdate();
+        };
+        this.__makeLogic(registry.get(this.__name).Logic, null);
+        ensureFetched(this.__name);
+      }
+      /** Error-boundary hook: a render crash anywhere in this DC's subtree
+       *  (its own template, an x-import'd component, a child DC without its
+       *  own deeper boundary) lands here instead of unmounting the page. */
+      static getDerivedStateFromError(e) {
+        return { __err: e instanceof Error && e.message ? e.message : String(e) };
+      }
+      componentDidCatch(e, info) {
+        console.error(
+          "[dc-runtime] render error in <" + this.__name + ">:",
+          e,
+          info?.componentStack || ""
+        );
+      }
+      /** Instantiate the logic class (or the no-op base) and adopt `prevState`
+       *  over its initial state — used both at mount and on hot-swap. */
+      __makeLogic(Logic, prevState) {
+        const L = Logic || StreamableLogic;
+        try {
+          this.logic = new L(this.__userProps());
+          this.__failedLogic = null;
+          this.__failedUserProps = null;
+          this.__ctorError = null;
+        } catch (e) {
+          console.error(e);
+          this.__failedLogic = Logic;
+          this.__failedUserProps = this.__userProps();
+          this.__failedVer = registry.get(this.__name).ver;
+          this.__ctorError = this.__name + ": " + (e instanceof Error && e.message ? e.message : String(e));
+          this.logic = new StreamableLogic(
+            this.__userProps()
+          );
+        }
+        this.logic.__host = this;
+        if (prevState)
+          this.logic.state = { ...this.logic.state || {}, ...prevState };
+      }
+      /** The props the author's logic + template see — internal __-prefixed
+       *  wiring stripped. */
+      __userProps() {
+        const { __name, __hintSize, __tplId, __hostStyle, ...rest } = this.props;
+        return rest;
+      }
+      __setLogicState(update, cb) {
+        const prev = this.logic.state;
+        const patch = typeof update === "function" ? update(prev) : update;
+        this.logic.state = { ...prev, ...patch };
+        this.setState((s) => ({ __v: s.__v + 1 }), cb);
+      }
+      /** Swap the logic instance when the registry's Logic class changed
+       *  (streaming completion, hot reload). State carries over; didMount
+       *  re-fires after the swap commits so refs exist. */
+      __reconcileLogic() {
+        const r = registry.get(this.__name);
+        const Next = r.Logic;
+        const Cur = this.logic.constructor;
+        if (Next === Cur || !Next && Cur === StreamableLogic || Next === this.__failedLogic && r.ver === this.__failedVer && shallowEqual(this.__userProps(), this.__failedUserProps)) {
+          return;
+        }
+        if (!this.__needsDidMount) {
+          try {
+            this.logic.componentWillUnmount();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        this.__makeLogic(Next, this.logic.state);
+        this.__needsDidMount = true;
+      }
+      componentDidMount() {
+        registry.get(this.__name).subs.add(this.__sub);
+        try {
+          this.logic.componentDidMount();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      componentDidUpdate(prevProps) {
+        this.logic.props = this.__userProps();
+        if (this.__needsDidMount) {
+          if (this.state.__err || !registry.get(this.__name).tpl) return;
+          this.__needsDidMount = false;
+          try {
+            this.logic.componentDidMount();
+          } catch (e) {
+            console.error(e);
+          }
+        } else {
+          try {
+            this.logic.componentDidUpdate(prevProps);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+      componentWillUnmount() {
+        registry.get(this.__name).subs.delete(this.__sub);
+        if (!this.__needsDidMount) {
+          try {
+            this.logic.componentWillUnmount();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+      render() {
+        const r = registry.get(this.__name);
+        const cls = "sc-host" + (r.htmlStreaming ? " sc-streaming-html" : "") + (r.jsStreaming ? " sc-streaming-js" : "");
+        const hintStyle = r.htmlStreaming ? hintToMin(this.props.__hintSize) : void 0;
+        const hostStyle = this.props.__hostStyle || hintStyle ? { ...hintStyle || {}, ...this.props.__hostStyle || {} } : void 0;
+        const hostBase = {
+          className: cls,
+          style: hostStyle,
+          "data-sc-name": this.__name,
+          "data-dc-tpl": this.props.__tplId
+        };
+        const chain = Array.isArray(this.context) ? this.context : [];
+        if (chain.includes(this.__name)) {
+          const cycle = [
+            ...chain.slice(chain.indexOf(this.__name)),
+            this.__name
+          ].join(" \u2192 ");
+          return h(
+            "div",
+            { ...hostBase, className: cls + " sc-has-error" },
+            h(Placeholder, {
+              name: this.__name,
+              hintSize: this.props.__hintSize,
+              error: "circular import: " + cycle
+            })
+          );
+        }
+        if (this.state.__err) {
+          return h(
+            "div",
+            { ...hostBase, className: cls + " sc-has-error" },
+            h(
+              "div",
+              { className: "sc-logic-error", "data-omelette-chrome": "" },
+              this.__name + ": " + this.state.__err
+            ),
+            h(Placeholder, {
+              name: this.__name,
+              hintSize: this.props.__hintSize,
+              error: this.state.__err
+            })
+          );
+        }
+        this.__reconcileLogic();
+        if (!r.tpl) {
+          return h(
+            "div",
+            hostBase,
+            h(Placeholder, { name: this.__name, hintSize: this.props.__hintSize })
+          );
+        }
+        const userProps = this.__userProps();
+        this.logic.props = userProps;
+        let vals = userProps;
+        let renderErr = r.logicError || this.__ctorError;
+        try {
+          vals = { ...userProps, ...this.logic.renderVals() || {} };
+        } catch (e) {
+          console.error(e);
+          renderErr = this.__name + ".renderVals(): " + (e instanceof Error && e.message ? e.message : String(e));
+        }
+        this.__streamingNow = !!(r.htmlStreaming || r.jsStreaming);
+        this.__htmlStreamingNow = !!r.htmlStreaming;
+        return h(
+          "div",
+          { ...hostBase, className: cls + (renderErr ? " sc-has-error" : "") },
+          renderErr && h(
+            "div",
+            { className: "sc-logic-error", "data-omelette-chrome": "" },
+            renderErr
+          ),
+          h(
+            AncestorContext.Provider,
+            { value: [...chain, this.__name] },
+            r.tpl(vals, this)
+          )
+        );
+      }
+    }
+    __publicField(StreamableComponent, "contextType", AncestorContext);
+    const named = /* @__PURE__ */ new Map();
+    function getDC(name) {
+      const hit = named.get(name);
+      if (hit) return hit;
+      function Dispatcher(p) {
+        const [, setTick] = React.useState(0);
+        React.useEffect(() => {
+          const sub = () => setTick((n) => n + 1);
+          registry.get(name).subs.add(sub);
+          return () => {
+            registry.get(name).subs.delete(sub);
+          };
+        }, []);
+        ensureFetched(name);
+        return h(StreamableComponent, { ...p, __name: name });
+      }
+      Dispatcher.displayName = name;
+      named.set(name, Dispatcher);
+      return Dispatcher;
+    }
+    return {
+      getDC,
+      StreamableComponent
+    };
+  }
+
+  // src/external.ts
+  var isCustomElementName = (n) => !n.includes(".") && n.includes("-");
+  function isRenderableType(g) {
+    if (typeof g === "function") return !isElementClass(g);
+    return typeof g === "object" && g !== null && typeof g.$$typeof === "symbol";
+  }
+  function resolveDottedPath(root, name) {
+    let cur = root;
+    for (const seg of name.split(".")) {
+      if (cur == null) return void 0;
+      cur = cur[seg];
+    }
+    return cur;
+  }
+  var BABEL_URL = "https://unpkg.com/@babel/standalone@7.29.0/babel.min.js";
+  var BABEL_SRI = "sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y";
+  var GLOBAL_POLL_INTERVAL_MS = 50;
+  var GLOBAL_POLL_TIMEOUT_MS = 3e4;
+  function createExternalModules(onResolved) {
+    const cache = /* @__PURE__ */ new Map();
+    let babelLoading = null;
+    const reportedMissing = /* @__PURE__ */ new Map();
+    const polling = /* @__PURE__ */ new Set();
+    function ensureBabel() {
+      if (window.Babel) return Promise.resolve();
+      if (babelLoading) return babelLoading;
+      babelLoading = new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = BABEL_URL;
+        s.integrity = BABEL_SRI;
+        s.crossOrigin = "anonymous";
+        s.onload = () => res();
+        s.onerror = rej;
+        document.head.appendChild(s);
+      });
+      return babelLoading;
+    }
+    const pending = /* @__PURE__ */ new Map();
+    function load(kind, url, after) {
+      const existing = pending.get(url);
+      if (existing) return existing;
+      cache.set(url, null);
+      console.info("[dc-runtime] x-import: loading", url, "(" + kind + ")");
+      const ready = Promise.all([
+        kind === "jsx" ? ensureBabel() : Promise.resolve(),
+        after ?? Promise.resolve()
+      ]);
+      const p = ready.then(() => fetch(url)).then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      }).then((src) => {
+        const code = kind === "jsx" ? window.Babel.transform(src, {
+          filename: url,
+          presets: ["react", "typescript"]
+        }).code : src;
+        const module = { exports: {} };
+        const before = new Set(Object.keys(window));
+        //! nosemgrep: eval-and-function-constructor
+        new Function("React", "module", "exports", "require", code)(
+          getReact(),
+          module,
+          module.exports,
+          () => ({})
+        );
+        const globals = {};
+        for (const k of Object.keys(window)) {
+          if (!before.has(k) && typeof window[k] === "function") {
+            globals[k] = window[k];
+          }
+        }
+        cache.set(url, { mod: module.exports, globals });
+        console.info(
+          "[dc-runtime] x-import: loaded",
+          url,
+          "\u2014 exports:",
+          Object.keys(module.exports),
+          "window globals:",
+          Object.keys(globals)
+        );
+        onResolved();
+      }).catch((e) => {
+        cache.set(url, {
+          mod: {},
+          globals: {},
+          error: "failed to load: " + (e instanceof Error && e.message ? e.message : String(e))
+        });
+        console.error(
+          "[dc-runtime] x-import: FAILED to load",
+          url,
+          "(" + kind + ")",
+          e
+        );
+        onResolved();
+      });
+      pending.set(url, p);
+      return p;
+    }
+    function resolve2(url, name) {
+      const entry = cache.get(url);
+      if (!entry) return null;
+      const { mod, globals } = entry;
+      const C = mod && mod[name] || globals && globals[name] || typeof window !== "undefined" && window[name] || mod && mod.default;
+      if (typeof C === "function") return C;
+      const key = url + "\0" + name;
+      if (!reportedMissing.has(key)) {
+        reportedMissing.set(
+          key,
+          entry.error || 'no export named "' + name + '" (has: ' + Object.keys(mod).join(", ") + ")"
+        );
+        console.error(
+          "[dc-runtime] x-import: module",
+          url,
+          "loaded but has no component named",
+          JSON.stringify(name),
+          "\u2014 available exports:",
+          Object.keys(mod),
+          "window globals:",
+          Object.keys(globals),
+          ". The module must `module.exports = {" + name + "}` or set `window." + name + "`."
+        );
+      }
+      return null;
+    }
+    function waitForGlobal(name) {
+      if (polling.has(name)) return;
+      polling.add(name);
+      const started = Date.now();
+      const isCE = isCustomElementName(name);
+      const tick = () => {
+        const found = isCE ? customElements.get(name) : isRenderableType(resolveDottedPath(window, name));
+        if (found) {
+          polling.delete(name);
+          onResolved();
+          return;
+        }
+        if (Date.now() - started >= GLOBAL_POLL_TIMEOUT_MS) {
+          console.warn(
+            "[dc-runtime] x-import: global",
+            JSON.stringify(name),
+            "never appeared on window after " + GLOBAL_POLL_TIMEOUT_MS + "ms"
+          );
+          return;
+        }
+        setTimeout(tick, GLOBAL_POLL_INTERVAL_MS);
+      };
+      setTimeout(tick, GLOBAL_POLL_INTERVAL_MS);
+    }
+    function resolveGlobal(url, name) {
+      const isCE = isCustomElementName(name);
+      if (!url) {
+        if (isCE) {
+          if (customElements.get(name)) return name;
+          waitForGlobal(name);
+          return null;
+        }
+        const g2 = resolveDottedPath(window, name);
+        if (isRenderableType(g2)) return g2;
+        waitForGlobal(name);
+        return null;
+      }
+      const entry = cache.get(url);
+      if (!entry) return null;
+      if (isCE && customElements.get(name)) return name;
+      const g = entry.globals[name] ?? resolveDottedPath(window, name);
+      if (isRenderableType(g)) return g;
+      if (name.includes(".")) return null;
+      const key = url + "\0global\0" + name;
+      if (!reportedMissing.has(key)) {
+        reportedMissing.set(key, null);
+        if (isCE && !customElements.get(name)) {
+          console.warn(
+            "[dc-runtime] x-import:",
+            url,
+            "loaded but no custom element",
+            JSON.stringify(name),
+            "is registered and window." + name + " is not a function \u2014 rendering <" + name + "> as an unknown element."
+          );
+        }
+      }
+      return name;
+    }
+    function getError(url, name) {
+      const entry = cache.get(url);
+      if (entry?.error) return entry.error;
+      return reportedMissing.get(url + "\0" + name) || null;
+    }
+    return { load, resolve: resolve2, resolveGlobal, getError };
+  }
+  function isElementClass(g) {
+    try {
+      return typeof g === "function" && typeof HTMLElement !== "undefined" && g.prototype instanceof HTMLElement;
+    } catch {
+      return false;
+    }
+  }
+
+  // src/atomics.ts
+  var ATOMIC_CSS = (
+    // layout
+    ".fx{display:flex}.col{display:flex;flex-direction:column}.grid{display:grid}.ac{align-items:center}.jc{justify-content:center}.jb{justify-content:space-between}.f1{flex:1}.noshrink{flex-shrink:0}.wrap{flex-wrap:wrap}.fw5{font-weight:500}.fw6{font-weight:600}.fw7{font-weight:700}.fw8{font-weight:800}.fs11{font-size:11px}.fs12{font-size:12px}.fs13{font-size:13px}.fs14{font-size:14px}.fs15{font-size:15px}.fs16{font-size:16px}.fs20{font-size:20px}.fs22{font-size:22px}.upper{text-transform:uppercase}.tc{text-align:center}.nowrap{white-space:nowrap}.gap8{gap:8px}.gap10{gap:10px}.gap12{gap:12px}.gap16{gap:16px}.gap24{gap:24px}.m0{margin:0}.mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}.mb8{margin-bottom:8px}.mb12{margin-bottom:12px}.mb16{margin-bottom:16px}.posrel{position:relative}.posabs{position:absolute}.round{border-radius:50%}.ohide{overflow:hidden}.bbox{box-sizing:border-box}.pointer{cursor:pointer}.w100{width:100%}.b0{border:none}"
+  );
+
+  // src/helmet.ts
+  var DESIGN_DOC_MODE_RE = /<meta\b[^>]*\bname\s*=\s*["']design_doc_mode["'][^>]*\b(?:content|value)\s*=\s*["'](\w+)["']/i;
+  var CANVAS_BG_LIGHT = "#f0eee6";
+  var CANVAS_BG_DARK = "#2e2c26";
+  function createHelmetManager(doc, isStreaming) {
+    const mounted = /* @__PURE__ */ new Set();
+    const live = /* @__PURE__ */ new Map();
+    let designDocMode = null;
+    let canvasStyleEl = null;
+    let appTheme = "light";
+    try {
+      const ds = doc.documentElement.dataset.theme;
+      appTheme = ds === "dark" || ds === "light" ? ds : new URLSearchParams(doc.defaultView?.location.search ?? "").get(
+        "theme"
+      ) === "dark" ? "dark" : "light";
+    } catch {
+    }
+    function applyCanvasBg() {
+      if (!canvasStyleEl) return;
+      const bg = appTheme === "dark" ? CANVAS_BG_DARK : CANVAS_BG_LIGHT;
+      canvasStyleEl.textContent = `html,body{background:${bg}}#dc-root>.sc-host{position:relative}`;
+    }
+    function postDesignMode(mode) {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage({ type: "__dc_design_mode", mode }, "*");
+      } catch {
+      }
+    }
+    function setDesignDocMode(mode) {
+      if (mode === designDocMode) return;
+      designDocMode = mode;
+      postDesignMode(mode);
+      if (mode === "canvas") {
+        doc.documentElement.setAttribute("data-dc-canvas", "");
+        canvasStyleEl = doc.createElement("style");
+        canvasStyleEl.setAttribute("data-dc-canvas", "");
+        applyCanvasBg();
+        doc.head.appendChild(canvasStyleEl);
+      } else {
+        doc.documentElement.removeAttribute("data-dc-canvas");
+        canvasStyleEl?.remove();
+        canvasStyleEl = null;
+      }
+    }
+    window.addEventListener("message", (e) => {
+      const type = e.data && e.data.type;
+      if (type === "__dc_theme") {
+        const t = e.data.theme;
+        if (t === "light" || t === "dark") {
+          appTheme = t;
+          doc.documentElement.dataset.theme = t;
+          applyCanvasBg();
+        }
+        return;
+      }
+      if (!designDocMode || type !== "__dc_probe") return;
+      postDesignMode(designDocMode);
+    });
+    function compile(node) {
+      const raw = [...node.children];
+      const helmetClosed = node.nextSibling != null || node.parentNode?.nextSibling != null;
+      if (node.hasAttribute("data-dc-atomics") && !mounted.has("__dc-atomics")) {
+        mounted.add("__dc-atomics");
+        const el = doc.createElement("style");
+        el.id = "__dc-atomics";
+        el.textContent = ATOMIC_CSS;
+        doc.head.appendChild(el);
+      }
+      return (_vals, ctx) => {
+        const name = ctx && ctx.__name || "";
+        const streaming = !!(name && isStreaming(name));
+        for (let i = 0; i < raw.length; i++) {
+          const child = raw[i];
+          const tag = child.tagName;
+          const mayBePartial = streaming && !helmetClosed && i === raw.length - 1;
+          if (tag === "SCRIPT") {
+            if (mayBePartial) continue;
+            const key = "SCRIPT|" + (child.getAttribute("src") || child.textContent || "");
+            if (mounted.has(key)) continue;
+            mounted.add(key);
+            const el = doc.createElement("script");
+            for (const { name: an, value } of [...child.attributes])
+              el.setAttribute(an, value);
+            if (child.textContent) el.textContent = child.textContent;
+            doc.head.appendChild(el);
+          } else if (tag === "LINK" || tag === "META") {
+            if (mayBePartial) continue;
+            const key = tag + "|" + (child.getAttribute("href") || child.getAttribute("src") || child.outerHTML);
+            if (mounted.has(key)) continue;
+            mounted.add(key);
+            doc.head.appendChild(child.cloneNode(true));
+          } else {
+            const key = name + "|" + i;
+            let el = live.get(key);
+            if (!el || el.tagName !== tag) {
+              if (el) el.remove();
+              el = doc.createElement(tag.toLowerCase());
+              live.set(key, el);
+              doc.head.appendChild(el);
+            }
+            for (const { name: an, value } of [...child.attributes]) {
+              if (el.getAttribute(an) !== value) el.setAttribute(an, value);
+            }
+            if (el.textContent !== child.textContent)
+              el.textContent = child.textContent;
+          }
+        }
+        return null;
+      };
+    }
+    return { compile, setDesignDocMode };
+  }
+
+  // src/pseudo.ts
+  function createPseudoSheet(doc) {
+    let el = null;
+    const cache = /* @__PURE__ */ new Map();
+    let n = 0;
+    return (pseudo, css) => {
+      const k = pseudo + "|" + css;
+      const hit = cache.get(k);
+      if (hit) return hit;
+      if (!el) {
+        el = doc.createElement("style");
+        doc.head.appendChild(el);
+      }
+      const cls = "scp" + (n++).toString(36);
+      const sel = pseudo === "before" || pseudo === "after" ? "." + cls + "::" + pseudo : "." + cls + ":" + pseudo;
+      el.sheet.insertRule(sel + "{" + css + "}", el.sheet.cssRules.length);
+      cache.set(k, cls);
+      return cls;
+    };
+  }
+
+  // src/registry.ts
+  function createRegistry() {
+    const entries = /* @__PURE__ */ Object.create(null);
+    function get(name) {
+      return entries[name] || (entries[name] = {
+        html: "",
+        tpl: null,
+        Logic: null,
+        jsStreaming: false,
+        htmlStreaming: false,
+        ver: 0,
+        subs: /* @__PURE__ */ new Set(),
+        fetched: false
+      });
+    }
+    function bump(name) {
+      const r = get(name);
+      r.ver++;
+      for (const fn of r.subs) fn();
+    }
+    return {
+      entries,
+      get,
+      bump,
+      bumpAll() {
+        for (const n in entries) bump(n);
+      }
+    };
+  }
+
+  // src/runtime.ts
+  var COMPONENT_DIR = ".";
+  function createRuntime(doc = document) {
+    const registry = createRegistry();
+    const pseudoClass = createPseudoSheet(doc);
+    const helmet = createHelmetManager(
+      doc,
+      (name) => registry.get(name).htmlStreaming
+    );
+    const external = createExternalModules(() => registry.bumpAll());
+    const factory = createComponentFactory(registry, ensureFetched);
+    const host = {
+      component: (name) => factory.getDC(name),
+      placeholder: (props) => h(Placeholder, props),
+      helmet: (node) => helmet.compile(node),
+      loadExternal: (kind, url, after) => external.load(kind, url, after),
+      resolveExternal: (url, name) => external.resolve(url, name),
+      resolveExternalGlobal: (url, name) => external.resolveGlobal(url, name),
+      resolveExternalError: (url, name) => external.getError(url, name),
+      pseudoClass
+    };
+    function ensureFetched(name) {
+      const r = registry.get(name);
+      if (r.fetched) return;
+      r.fetched = true;
+      const url = COMPONENT_DIR + "/" + encodeURIComponent(name) + ".dc.html";
+      fetch(url).then((res) => {
+        if (!res.ok) {
+          console.error(
+            "[dc-runtime] sibling fetch for <" + name + "/> failed:",
+            url,
+            "returned",
+            res.status,
+            "\u2014 the reference renders as an empty placeholder."
+          );
+          return "";
+        }
+        return res.text();
+      }).then((t) => {
+        if (!t) return;
+        const parsed = parseDcText(t);
+        if (!parsed) {
+          console.error(
+            "[dc-runtime] sibling fetch for <" + name + "/>:",
+            url,
+            "has no <x-dc> block \u2014 not a Design Component."
+          );
+          return;
+        }
+        if (parsed.props) r.propsMeta = parsed.props;
+        if (parsed.preview) r.preview = parsed.preview;
+        if (parsed.template && !r.html) updateHtml(name, parsed.template);
+        if (parsed.js && !r.Logic) updateJs(name, parsed.js);
+      }).catch(
+        (e) => console.error(
+          "[dc-runtime] sibling fetch for <" + name + "/> threw:",
+          url,
+          e
+        )
+      );
+    }
+    let rootName = null;
+    function updateHtml(name, html) {
+      const r = registry.get(name);
+      r.html = html;
+      if (name === rootName) {
+        const mode = DESIGN_DOC_MODE_RE.exec(html)?.[1] ?? null;
+        if (mode || !r.htmlStreaming) helmet.setDesignDocMode(mode);
+      }
+      try {
+        r.tpl = compileTemplate(html, host);
+      } catch (e) {
+        console.error("[dc-runtime] template compile FAILED for", name, e);
+      }
+      registry.bump(name);
+    }
+    function updateJs(name, src) {
+      const r = registry.get(name);
+      const seq = r.jsSeq = (r.jsSeq || 0) + 1;
+      try {
+        const Cls = evalDcLogic(src);
+        if (r.jsSeq !== seq) return;
+        if (typeof Cls !== "function") {
+          r.logicError = name + ".dc.html: <script data-dc-script> must define `class Component extends DCLogic`";
+        } else {
+          r.logicError = null;
+          r.Logic = Cls;
+        }
+      } catch (e) {
+        if (r.jsSeq !== seq) return;
+        console.error(
+          "[dc-runtime] logic class eval FAILED for",
+          name,
+          "\u2014 the template renders with props only.",
+          e
+        );
+        r.logicError = name + ": " + (e instanceof Error && e.message ? e.message : String(e));
+      }
+      registry.bump(name);
+    }
+    function setStreaming(name, kind, on) {
+      const r = registry.get(name);
+      if (kind === "html") r.htmlStreaming = !!on;
+      else r.jsStreaming = !!on;
+      let any = false;
+      for (const n in registry.entries) {
+        const e = registry.entries[n];
+        if (e && (e.htmlStreaming || e.jsStreaming)) {
+          any = true;
+          break;
+        }
+      }
+      doc.documentElement.classList.toggle("sc-dc-streaming", any);
+      registry.bump(name);
+    }
+    function dcUpdate(name, kind, content, streaming) {
+      if (streaming) registry.get(name).fetched = true;
+      if (kind === "html") {
+        setStreaming(name, "html", !!streaming);
+        updateHtml(name, content);
+      } else if (kind === "js") {
+        setStreaming(name, "js", !!streaming);
+        if (!streaming) updateJs(name, content);
+      } else if (kind === "props") {
+        const { props, preview } = parseDataProps(content);
+        const r = registry.get(name);
+        r.propsMeta = props ?? void 0;
+        r.preview = preview;
+        registry.bump(name);
+      }
+    }
+    function setProps(name, overrides) {
+      registry.get(name).propOverrides = overrides && typeof overrides === "object" ? { ...overrides } : null;
+      registry.bump(name);
+    }
+    function adoptParsed(name, parsed) {
+      if (!parsed) return;
+      const r = registry.get(name);
+      if (parsed.props) r.propsMeta = parsed.props;
+      if (parsed.preview) r.preview = parsed.preview;
+      if (parsed.template) updateHtml(name, parsed.template);
+      if (parsed.js) updateJs(name, parsed.js);
+    }
+    return {
+      registry,
+      getDC: factory.getDC,
+      updateHtml,
+      updateJs,
+      dcUpdate,
+      setProps,
+      adoptParsed,
+      setRootName: (name) => {
+        rootName = name;
+      },
+      markFetched: (name) => {
+        registry.get(name).fetched = true;
+      },
+      annotatedTemplate: (name) => {
+        const r = registry.get(name);
+        return r.tpl && r.tpl.__annotated || null;
+      },
+      templateSource: (name) => registry.get(name).html || null,
+      StreamableLogic
+    };
+  }
+
+  // src/stream-state.ts
+  function createStreamTracker(staleMs = 6e4, now = Date.now) {
+    const since = /* @__PURE__ */ new Map();
+    const liveOne = (n) => {
+      const t = since.get(n);
+      if (t === void 0) return false;
+      if (now() - t > staleMs) {
+        since.delete(n);
+        return false;
+      }
+      return true;
+    };
+    return {
+      push(name, streaming, viewportKey) {
+        if (viewportKey === "dc-model") return;
+        if (streaming) since.set(name, now());
+        else since.delete(name);
+      },
+      live(name) {
+        if (name !== void 0) return liveOne(name);
+        for (const n of [...since.keys()]) if (liveOne(n)) return true;
+        return false;
+      }
+    };
+  }
+
+  // src/index.ts
+  var REACT_URL = "https://unpkg.com/react@18.3.1/umd/react.production.min.js";
+  var REACT_SRI = "sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z";
+  var REACT_DOM_URL = "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js";
+  var REACT_DOM_SRI = "sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1";
+  function hideRawTemplate() {
+    const s = document.createElement("style");
+    s.textContent = "x-dc{display:none!important}";
+    document.head.appendChild(s);
+  }
+  function loadScript(src, integrity) {
+    return new Promise((resolve2, reject) => {
+      //! nosemgrep: create-script-element
+      const s = document.createElement("script");
+      s.src = src;
+      s.integrity = integrity;
+      s.crossOrigin = "anonymous";
+      s.async = false;
+      s.onload = () => resolve2();
+      s.onerror = () => reject(new Error(`failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+  function loadReactUmd() {
+    const w = window;
+    if (w.React && w.ReactDOM) return Promise.resolve();
+    return Promise.all([
+      loadScript(REACT_URL, REACT_SRI),
+      loadScript(REACT_DOM_URL, REACT_DOM_SRI)
+    ]).then(() => void 0);
+  }
+  function init() {
+    const runtime = createRuntime(document);
+    let rootName = "Root";
+    const baseCss = document.createElement("style");
+    baseCss.textContent = BASE_CSS;
+    document.head.prepend(baseCss);
+    const notifyHost = () => {
+      if (window.parent === window) return;
+      const r = runtime.registry.entries[rootName];
+      try {
+        window.parent.postMessage(
+          {
+            type: "__dc_booted",
+            rootName,
+            propsMeta: r && r.propsMeta || null,
+            preview: r && r.preview || null
+          },
+          "*"
+        );
+      } catch {
+      }
+    };
+    const streams = createStreamTracker();
+    const api = {
+      __dcUpdate: (name, kind, content, streaming, viewportKey) => {
+        streams.push(name, streaming, viewportKey);
+        runtime.dcUpdate(name, kind, content, streaming);
+        if (name === rootName && !streaming && kind === "props") notifyHost();
+      },
+      __dcStreaming: (name) => streams.live(name),
+      __dcSetProps: (name, overrides) => runtime.setProps(name, overrides),
+      /** Name of the component currently mounted as the page root — DC tools
+       *  push their template-stream here when targeting "the open page". */
+      __dcRootName: () => rootName,
+      /** Editor bridge — the encoded, `data-dc-tpl`-annotated template source.
+       *  The host editor parses this into its own template DOM so it can map a
+       *  rendered node (carrying the same `data-dc-tpl`) back to the source
+       *  node that emitted it. Returns the encoded form (`<sc-comp>`,
+       *  `sc-camel-*` attrs); the editor decodes on serialize. */
+      __dcAnnotatedTemplate: (name) => runtime.annotatedTemplate(name),
+      /** Editor bridge — the *original* (decoded) template source. */
+      __dcTemplateSource: (name) => runtime.templateSource(name),
+      __dcBoot: () => {
+        rootName = boot(runtime, document) ?? rootName;
+        notifyHost();
+      },
+      __dcRegistry: runtime.registry.entries,
+      getDC: (name) => runtime.getDC(name),
+      // `DCLogic` is the documented base class name; `StreamableLogic` is the
+      // implementation alias kept for any project that already references it.
+      DCLogic: runtime.StreamableLogic,
+      StreamableLogic: runtime.StreamableLogic
+    };
+    Object.assign(window, api);
+    window.__dcContentKeyed = true;
+    if (document.readyState !== "loading") api.__dcBoot();
+    else document.addEventListener("DOMContentLoaded", () => api.__dcBoot());
+  }
+  hideRawTemplate();
+  loadReactUmd().then(init).catch((err) => {
+    console.error("[dc] failed to load React or boot:", err);
+    throw err;
+  });
+})();
+
+</script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(data:font/woff2;base64,d09GMgABAAAAABD8AA4AAAAAJagAABCkAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGhYbHhwuBmAAglAREAqzYKkdC4FcAAE2AiQDgzQEIAWDOgeHaxuRHgXs2COwcQCbmJ8D8H+1YE6Ytxm8hmcytk2L2Zamg5Qx2PlMg7S+EGf+YUxHdjARCS+51005MkKSWR6CY/67W7SNkyaSP9I+FlW4NWmDli5+nt/mnwcXi1QRoxALC1GJlhb6AY+0m+kq0u136tK/Hx3ut6v8X7vKtD9vu4PRiTWgrl6Cp0yGCrjRziWRJ55wqpml8vyLpzjTNPn4jWblNO8km+xK8xQHu8jlayHkTSWa0ljpPIAFsOR/10o7fycpp8wHwtRvr2BkjaiazSxlMtk9AJoDgjYFcsC2NYZRAaACQNXnK5xk3YbMUxJ1qKnzNdQOc9V2p8pSgaQ/ZkUBoAmr8gkYYEC+WaAOWfuoMOPtICAOEACrewAcrBycDB+edrogOgDsu9axIWADJDZWJIVsRwHIjVFmYD/vNJpShfiMJ1Ep8RQSGR4OB20AgEuzu+bkYudA7wFhd/8BRQxLfgDbB0hEmgJ6pKDA2ptjpR/CVOd3iAtBHIAWcLWZUIbmoCPoAfQYego9h06iV9BX6Ad0AV1BN7jPj9jJDa2pUbQTfUfyKHoSPYteROfQB+hb9DP6F12H1+wLmknAClZvW038DgMGfHD6vymgYGRmYUMIGRC1vK0BAsjgU0WPyyBPnUJWxZzKuJRzq4AT8KjkVyNMKkKmgUIjpWZqNmYF+LRy1Mqmk8uIp4WGST6LIg6l7Ep4CRGqBYgEiYVI1JNrooIBGeIgAVgo91aYALgHeANwAir6oKYPYi0IWYDMPgw8xU+mCgwnYW1+b0XBnVtgPJwK1h3Zkz2gr9rV42m3C61787T0cXrqrlWJORDiMRKTxsHl0NPZjKQ4RKOxOTSFhBGfQ2chr5lXxkihJiC+oM7S+WEz8goFtIy8TBaDHR9bQOOkpzPyyysz8pFbp9OLONnZ6YjBQCjpegupscyYNh6FZjF9TPTARiBSZuAwdfiDSKZc0mS1ihOLSJTlpmLUySgiQXCuP4F/M+mEqsxQpyBL5uCIBNgs9o6GiGPRcnnp0wRBSNzvpRbnC9lQ1h72P2ykVJHB8WpXTQROzu54Ge/dzzpd5DKWYi4EXgdPoqIx48EZDY4oClbVchAJR9qjdonT3pyD2ekXx7c2kw+gDB2rih2Fr1FixskRDZl7cZJfCypzqBdkFN0R39kSmml4RC1VMtN1ntWcFtiYTvgLV7Z2WEmd+hupPcO9SWXd6u4yoiYilN3u+FKGlrM4ceueGDkxv5LpFuvq7oym16epTtkEBI798IxWa+eFyBYrQaQLCSqylaJWpWegFm5/m7SXiKBvdtPdKHvnwGFekVoZumw16WXUrcxR4AXC58xpQzv/KPWzLfaFUl0BW7gzdwagKo4pPK1qYKDGFZXCwPLWNCT+/gpqiI9y19x2FjemMzo0HMFTg44Pso555D9LkP9Fy8kdTckdM9iANVZ4j7NcpZzrqwfHaDIhYRWNoNUQsfO0Q4P+QWo1tqrB0dPhlpaGPZtH25Dw9WZxewsdQiZzq/jDQeIe0WS0NNkRfTnudvOnoFPNPQLDlG3FfH1Uxe/wPE7zr3A2fCNGyTc7A//KX3dzygtQasSFUwyUyQcvEyQZCJC7gn8NxTHyYyXAyI7zq4b24jkjqn86s9axQIjzPOdfIxOdmLlaeI/Xm9sPIlDmrtT4GJkRi+pxCfmWz2SZSSYrFDfMC8x8ykZLg4pd/WvRB/rAVTDvUFDYG3j2D5VtZEfAT7c8No4bo65RluhrfHxZscxD4yjeUMKrXGhIQGNhJyTip3qL6q176hlYaMWvUNG3powhEuQMxlviv16imXf8nQpAl6sWfO3qvDT0MTFTg0Gujn+b2jYtekqCUjqymZBYF1y/YAYtLp1JHlZHnGV2jFmLxgSlte+h1hv94pd+H6j7iuZG9XQ7IXFEIrtdDduPRp2dlcgVKy0BjDyEu55NOw+7BdmKNASTfmmGxHYZf7tQocjc0Kg9npDhJJiVnEULo4N1MfNc0oQx1p3i7KR6c0+xMVO9Nnmlx8nYGk76i4SPv7uoe/ovurO4tDTaN8qJ3RPwX+UyA4Vmq671NPuslh7n+FCN/LpSpONXB3elZP1fXN9X782ymAskuYKQnu0fsuiKi1L46+FhH6pqHmzu27J8uWmBtg4VETjCVyky7yjMGVMZZsWdTLODMIfIBqDpF1wkEf2JgkkyC15LYKosVKgx57WpNbx2tTlQKBYRhUp9br20aGkaL7zhwQKRvVL+UHuf3vNV3rwNPbxYPpVXZzFBa0dnJhotucf1tHY12XF1ndqoSvtG6k/vwqGMKgkUqsy5bRp1bjvXYlOCG9+u1uS21RAbDR43YSOIz9A4aPiYjN8bW4N/ejDbYZwv3/LBDW/gC8d5dMbCT4rXrwwNfjY5fDzxLfGt+HsQmXrSGvnLZXVdjliBMDwpetLw9GknUEbV1guV9ZlrAv7Mta7FphY3fq0/kLlmd7WW0u31LEIcFbH89dtLj8H8oqiYRWwcSEn/P9TS/gJxFAWOUm8TrkISVFIrbZnCTD0/88FlTbod2wLkPN3wor4kyeeyInP2z9onuoolZebUrNPFnKUNrbrdIqXgPnnyuVSFrlZV4uAd5G0bFsJmqtxqt7kirmCt2HB/UdFjH2vnPODEciq+oJAVWl6xyz13XEJKrxOGK5P/7WHiB+c+3l6YW2NVmshf6yX0NOHi51MIkfQNAbPkjvA+QZXRwjvHs9hy4FyKq5Z2SsM+HRIsFIX7zc4TXE+mgvTN/c93Jd6bdJkenj1sOnzzYdP1nCVdw2tHrHhGOdvyRCz/4P+ClMnN4m9NXE5gPFJvaKpSNmSsJh4fO73MUjphTyTECbIEMX2q7BMQMxPSzuCyt6+Oo9BHklMOzZehr2xfhWq/tEtPLegXoQc+l77tqZ0JXbABh4r31DCfGnfy5ZY7BYxivnCTYUWblZbXY1RZitvHee1ST3eHVSdMfRtJm6rs0QA0kfHY2FWItNGOyjWCA39TzphzpETAhb+IPyVsVKtsOdz3cYSDmIyfDLrqg05X2O9++JChIp9fyudVOKbtZ1meWpLa1KkO+OLm3SOVHKcYZ6esJG+4xiTyikyRGo8Ne+cjI+W4PPnfed64YIfapPFCGjUwZiKmrR19Jo9OnVJj0trarA3roilCvVyvsJbMmRH1SF1DQ+2E1e5aT/nFP29hsYDr+DyUDe5JooX+FiWrBJ+CRxI2Wnp44QucyMY6/jCpcGiBJfBL+InxX9dmqeCxJMqjZmqpxp+t5jTUvk68LqTr49r4FVrqrUZiioDKSW+auamjv7Ozo79p/z5L9W65SL672szyjXinvLD/+0HN4B9RI+++ac30DzjoVxE/5Va0GgkDKXuzzMarP5luy0TbvKoU46IOngCYAu8s0AU3vn0K1ko+NMPFeC0KVr2d92hs9gVjV1rBbXi+4Xnjy8ba+YD32zJpbY8NzeAI/3Jo4xe+Jefjd7NR9fMXfDu0H1rh2z8k5BKSuZq5/NWSAfNeSTjYr1w7FEZFRn9N5CH+uAYmzu41/v5ly3IfNjZ94fPhf3xl23qoS8K+Yy0zOPjI+JezX+Ln/B9aNzfMzGZB/JZ54UuK8YVz+MwLM7utuJjSGA/X7zhAaS1Ij2+idm0baTzDSrO/UGpv1BGzX2jLhPld4RJeiFcSnlsgMlTK16pdtV+stAI6T/ZY33L/gB4H/emeJ7+Jw1VFYL7Cg2Qe3/yGs5SpOy3OAbUfKf2OgYZTt7e94v/QCrMN/1DOmHJkkU7ntEk48BeF/c2aBk3gyWP1+qFGtF2zfbc6czv4bnu2la6z1vz0uvZ1nMDbtTAbua81s04Xiiml0qEyr8dcPyLb+clC80P9xBKo0naoDRqvxrCpgCEEw9tRedb+gx0uxZtj23WMfB79vYONCZud8HPeeUr/pUUaYooQLdpVE16dTPo6iUJ8nxZ+y/ODE95Qy8glZAf1Byu3SIYuTfrxzk6Pp/10aw3xhs5am/NxTOelylkTjo9MWC+LOtfJNjWfQX7XSCHej/W8PXeT/WtW01+dGgJmvepbanU/SrdExKj9BycIJwnRiyKm9eQooX5RTbyQJKRL0l891hmxSFivKfccZMYN0HtePP7U4snlQlN6JuedOu7a+Yxprg9f0hvtxZf4uNOM+WvruJPn9i8mtjiBJfFtrt+HmvYFNjf80v65vxlfG9iM/Jt9axu+IJ7JtMELzHqTKQsN1Aq1b9dQQV8s/OadxqnUzijcu+094v6THFLVN3MqxH836R/+KWPDbkPrrlV3TW/SQ/A1dPu7nf3LXuHYl2ZMg/d7cw+wGew3tzrnIcwW4GfrFcJs5IoVsHMoO6i5vSxUxyn+uG+WRpu9b2hx2ZeX3YYEcr++laddYh9CuDQV8+chFYUBKEPbT4KO9BhgABYhI0FNIm0oDfQq2fZnssFuobb6Y+S1w6sk1Vi5dbFvU9vlFO0yRwun1DiTT42Tu9q8BzgLi+KNUpJTuXEqBTONZvxKqgm+9MWzqJ0mFWxUn5ohd4J9F+8GlWZmctj+5SxdSuJRo6J4nnS/Hyr7eDkAa6vLpKJ9Wh92ANTHmcfKwFJyVgekQqMnB5SRF/Pqn2oGcSPxaR2Mk3OmSVmJV778TaNPax0JgIP4E5YEJA9KW2bcJv3ap6OX5/Ylli79HsUeJ9yUCIvLAYkFNECCAOP3sngTxIdrOc4rltbj+pNpgKtD2l5XDlZdcya8tN/zEsfVbYqKAUAo82XDMbhcj1dV342mNDNVv7h48gzgU0W+B/jekTV59/bdE1tfbA7UgASAAPiwchxkSKHcXg4MVtZ9huIu0IMKmsEg2vAghlyIAAEySIRMkcAv2DTIEWo9gIMESIKPg3JQgVDon0XCAkPCsNAEHKwGHDdDOwSBCgRI7PVA2ItlLcj2sUEbGERuAjbUQAgiiNTtf53EBwLjYAGVIOGgSpYBmO3LIVGw5WSxLUQIYAL2wnPzWoMDSALqSrwk93EdSvWK8SsvpPgqdLUaoXgAh26WAAwy/BhAAgZ8HEAGmYMBCEqNBFCAIxIQA0VEjAELXBm7x41QqCw9R7uo3hwb+/oJzGEDnA1XWLdm025mDlZ6TnjV6jSf87ChN66CNxfXbbzGWntYIMOjWihPZa5qAjXyfm7xc0sIXJeMX1kWhrLv1piO9skMljBiwZx5ty3oOC2hKtLILUs5WdSZILZ0BgxYCyk+B8M6OXSyuZN1qCNIsJrZ1RgVEPArdQ9sBAlMLOy8GhTgK1dNFWSYgGA7ChaDxWJxWDyWgFExGkbHGBgTY0mUJBlbCo5UadJlyJQlW45cXHl48hUoVKQYX4lSZcpVEKgkVKVaDRExCSkZOQUlFTWNWlo6egZGJmZ1LKxs7BycXNxwHl4+RF/D1n7ATgQEhYQjY5Ew7JCr2FbBwz8mnP/Gh3qr54qXEcIFiQHzfoOWSLEhJ2yoyFNsyAkSNlRkCD8kJAgJGUMT1ciDTRwOBe6olYSIRKEh+TC5ZZBFGSUUJAudOB1dDp0oICfC6ijw+coWODAiIMMISbBQQB3VjwcrWhIuICEmiyhJNAaByS0j1CYYsePEiwEjXoyYsWLHjjPJoe0f8DIEn/+Nog7+T+v0z9Bbl97R2/n3X+mY0MT3jvrdrdHxwYHW8TGsxBQ1mq9614lzCfVwGAAAAA==) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("b040412b-676c-4541-987e-e4f880d6657a") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("e2818a86-c42b-4075-b5d0-cf823920d12c") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("a2501027-38de-4626-95a7-d197b3f8b6d4") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("97f15388-756b-480e-b0e8-de37222d24e6") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("a0befa25-364f-4bbe-ba43-761afcf28c94") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("ab92fe22-dfda-4be4-b0b4-367c4fcb7bb2") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("23b06def-79d6-4af5-bf11-7871f65a9dd4") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("3ea754f8-1313-4376-b783-dc7093300d0a") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("9bb38695-7301-4563-94c5-5dac01790195") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("78c21957-c950-4c13-bad1-9b151f7c7160") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("dfd89dc0-ee1c-4f4b-b37c-c48aa6134cd6") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("a6fdfe26-ae80-4307-b3fb-8e09f9bf6a9a") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("b080e007-b4d4-4821-ad3f-bb6eb32f5d80") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("bf8a0d29-c98d-4a0c-8a0b-32a6f516c636") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("35647b5e-562a-45ac-b806-95251a1f4688") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("0385ba5a-c96c-457f-b5aa-29e19a03b507") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("e066c7f7-863e-4e50-93c0-d20b73085b4e") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("6023b8a1-017e-4135-a288-bb5bb2d6ac3e") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("45186fe1-841c-4382-ae8e-e9c10d7342ed") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("7e10fee2-d6a6-4da5-b6c0-aef2983c9b35") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("35647b5e-562a-45ac-b806-95251a1f4688") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("0385ba5a-c96c-457f-b5aa-29e19a03b507") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("e066c7f7-863e-4e50-93c0-d20b73085b4e") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("6023b8a1-017e-4135-a288-bb5bb2d6ac3e") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("45186fe1-841c-4382-ae8e-e9c10d7342ed") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("7e10fee2-d6a6-4da5-b6c0-aef2983c9b35") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("35647b5e-562a-45ac-b806-95251a1f4688") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("0385ba5a-c96c-457f-b5aa-29e19a03b507") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("e066c7f7-863e-4e50-93c0-d20b73085b4e") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("6023b8a1-017e-4135-a288-bb5bb2d6ac3e") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("45186fe1-841c-4382-ae8e-e9c10d7342ed") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("7e10fee2-d6a6-4da5-b6c0-aef2983c9b35") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("35647b5e-562a-45ac-b806-95251a1f4688") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("0385ba5a-c96c-457f-b5aa-29e19a03b507") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("e066c7f7-863e-4e50-93c0-d20b73085b4e") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("6023b8a1-017e-4135-a288-bb5bb2d6ac3e") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("45186fe1-841c-4382-ae8e-e9c10d7342ed") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("7e10fee2-d6a6-4da5-b6c0-aef2983c9b35") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("35647b5e-562a-45ac-b806-95251a1f4688") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("0385ba5a-c96c-457f-b5aa-29e19a03b507") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("e066c7f7-863e-4e50-93c0-d20b73085b4e") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("6023b8a1-017e-4135-a288-bb5bb2d6ac3e") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("45186fe1-841c-4382-ae8e-e9c10d7342ed") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("7e10fee2-d6a6-4da5-b6c0-aef2983c9b35") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+</style>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#F4F5F8;font-family:'Manrope',system-ui,sans-serif;color:#101828}
+  input,select,button,textarea{font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:#2D5BFF !important;box-shadow:0 0 0 3px rgba(45,91,255,.12)}
+  ::-webkit-scrollbar{height:8px;width:8px}
+  ::-webkit-scrollbar-thumb{background:#D0D5DD;border-radius:8px}
+  @keyframes popin{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;padding:0 0 60px">
+
+  <!-- HEADER -->
+  <div style="background:#0B1220;color:#fff;padding:20px 0 22px">
+    <div style="max-width:1180px;margin:0 auto;padding:0 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="width:40px;height:40px;border-radius:11px;background:linear-gradient(135deg,#2D5BFF,#12B76A);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px">R$</div>
+      <div style="margin-right:auto">
+        <div style="font-size:19px;font-weight:800;letter-spacing:-.02em">Controle de Investimentos</div>
+        <div style="font-size:12.5px;color:#98A2B3;margin-top:1px">Sincronizado com Google Sheets</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;background:#141d30;border:1px solid #22304d;border-radius:10px;padding:8px 12px">
+        <span style="font-size:11px;color:#98A2B3;font-weight:600">USD/BRL</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:#12B76A">R$ {{ usdBrlFmt }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;background:{{ syncPillBg }};border:1px solid {{ syncPillBorder }};border-radius:10px;padding:8px 12px">
+        <span style="width:8px;height:8px;border-radius:50%;background:{{ syncDot }};flex-shrink:0"></span>
+        <span style="font-size:11.5px;color:#E4E7EC;font-weight:600;white-space:nowrap">{{ syncPillText }}</span>
+      </div>
+      <button onclick="{{ onSync }}" style="background:#141d30;color:#E4E7EC;border:1px solid #22304d;border-radius:10px;padding:9px 13px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px">
+        <span style="font-size:14px;display:inline-block;animation:{{ spinAnim }}">⟳</span> Sincronizar
+      </button>
+      <button onclick="{{ onOpenConnect }}" title="Conexão" style="background:#141d30;color:#E4E7EC;border:1px solid #22304d;border-radius:10px;padding:9px 12px;font-size:15px;cursor:pointer">⚙</button>
+      <button onclick="{{ onNovo }}" style="background:#2D5BFF;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px;box-shadow:0 2px 8px rgba(45,91,255,.35)">
+        <span style="font-size:16px;line-height:1">＋</span> Novo lançamento
+      </button>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div style="max-width:1180px;margin:0 auto;padding:0 24px">
+    <div style="display:flex;gap:4px;border-bottom:1px solid #EAECF2;background:#fff;border-radius:0 0 4px 4px">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+        <button onclick="{{ t.onClick }}" style="background:none;border:none;padding:15px 18px;font-size:14px;font-weight:{{ t.weight }};color:{{ t.color }};cursor:pointer;border-bottom:2.5px solid {{ t.border }};margin-bottom:-1px">{{ t.label }}</button>
+      </sc-for>
+      <div style="margin-left:auto;align-self:center;padding-right:6px;font-size:12px;color:#12B76A;font-weight:600">{{ msg }}</div>
+    </div>
+  </div>
+
+  <div style="max-width:1180px;margin:0 auto;padding:24px">
+
+    <!-- ===== VISÃO GERAL ===== -->
+    <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:14px">
+          <div style="background:#0B1220;color:#fff;border-radius:16px;padding:18px 20px">
+            <div style="font-size:12px;color:#98A2B3;font-weight:600">Patrimônio total</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:25px;font-weight:600;margin-top:8px;letter-spacing:-.01em">R$ {{ kpiPatrimonio }}</div>
+            <div style="display:inline-flex;align-items:center;gap:5px;margin-top:9px;background:{{ rentBg }};color:{{ rentColor }};padding:3px 9px;border-radius:20px;font-size:12.5px;font-weight:700">{{ rentArrow }} {{ kpiRentPct }}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:18px 20px">
+            <div style="font-size:12px;color:#667085;font-weight:600">Total investido</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;margin-top:8px">R$ {{ kpiInvestido }}</div>
+            <div style="font-size:12px;color:#98A2B3;margin-top:9px">Custo de aquisição</div>
+          </div>
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:18px 20px">
+            <div style="font-size:12px;color:#667085;font-weight:600">Resultado</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;margin-top:8px;color:{{ rentColor }}">R$ {{ kpiRentBRL }}</div>
+            <div style="font-size:12px;color:#98A2B3;margin-top:9px">Lucro/prejuízo não realizado</div>
+          </div>
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:18px 20px">
+            <div style="font-size:12px;color:#667085;font-weight:600">Proventos recebidos</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;margin-top:8px;color:#12B76A">R$ {{ kpiProventos }}</div>
+            <div style="font-size:12px;color:#98A2B3;margin-top:9px">Dividendos + JCP</div>
+          </div>
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:18px 20px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:12px;color:#667085;font-weight:600">Carteira em dólar</span>
+              <span style="margin-left:auto;font-size:9.5px;font-weight:700;color:#F79009;background:#FFF6ED;padding:2px 7px;border-radius:20px;letter-spacing:.03em">US$ ONLY</span>
+            </div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;margin-top:8px">US$ {{ kpiPatrimonioUSD }}</div>
+            <div style="font-size:11.5px;color:#98A2B3;margin-top:2px">≈ R$ {{ kpiPatrimonioUSDbrl }}</div>
+            <div style="display:flex;gap:16px;margin-top:11px">
+              <div>
+                <div style="font-size:10.5px;color:#98A2B3">Investido</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600">US$ {{ kpiInvestidoUSD }}</div>
+              </div>
+              <div>
+                <div style="font-size:10.5px;color:#98A2B3">Resultado</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;color:{{ colorUSD }}">{{ kpiResultUSDpct }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:340px 1fr;gap:14px;margin-top:14px">
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:20px">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <div style="font-size:14.5px;font-weight:700">Alocação por tipo</div>
+              <div style="font-size:11px;color:#98A2B3;margin-left:auto">passe o mouse ou clique</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:18px;margin-top:14px">
+              <div style="position:relative;width:132px;height:132px;flex-shrink:0">
+                <svg viewBox="0 0 120 120" style="width:132px;height:132px;transform:rotate(-90deg)">
+                  <circle cx="60" cy="60" r="52" fill="none" stroke="#F0F1F5" stroke-width="15"></circle>
+                  <sc-for list="{{ donutSlices }}" as="s" hint-placeholder-count="4">
+                    <circle cx="60" cy="60" r="52" fill="none" stroke-width="{{ s.width }}" stroke="{{ s.color }}" stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}" opacity="{{ s.opacity }}" style="cursor:pointer;transition:stroke-width .15s,opacity .15s" onmouseenter="{{ s.onMouseEnter }}" onmouseleave="{{ s.onMouseLeave }}" onclick="{{ s.onClick }}"></circle>
+                  </sc-for>
+                </svg>
+                <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
+                  <div style="font-size:11px;color:#98A2B3">{{ donutCenterLabel }}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600">R$ {{ donutCenterValue }}</div>
+                </div>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:9px">
+                <sc-for list="{{ legend }}" as="l" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:8px;cursor:pointer;opacity:{{ l.opacity }};transition:opacity .15s" onmouseenter="{{ l.onMouseEnter }}" onmouseleave="{{ l.onMouseLeave }}" onclick="{{ l.onClick }}">
+                    <span style="width:9px;height:9px;border-radius:3px;background:{{ l.color }};flex-shrink:0"></span>
+                    <span style="font-size:12.5px;color:#344054;flex:1;font-weight:{{ l.weight }}">{{ l.label }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;color:#101828">{{ l.pct }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:20px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <div style="font-size:14.5px;font-weight:700">Evolução do capital investido</div>
+              <div style="font-size:12px;color:#98A2B3;margin-left:auto">acumulado por operação</div>
+            </div>
+            <svg viewBox="0 0 300 120" preserveAspectRatio="none" style="width:100%;height:180px;margin-top:14px;display:block">
+              <defs>
+                <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#2D5BFF" stop-opacity="0.22"></stop>
+                  <stop offset="100%" stop-color="#2D5BFF" stop-opacity="0"></stop>
+                </linearGradient>
+              </defs>
+              <path d="{{ areaPath }}" fill="url(#grad)"></path>
+              <path d="{{ linePath }}" fill="none" stroke="#2D5BFF" stroke-width="2.2" stroke-linejoin="round"></path>
+            </svg>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:20px;margin-top:14px">
+          <div style="font-size:14.5px;font-weight:700">Evolução dos dividendos</div>
+          <sc-if value="{{ noDivBars }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12.5px;color:#98A2B3;padding:24px 0;text-align:center">Sem proventos registrados ainda</div>
+          </sc-if>
+          <sc-if value="{{ !noDivBars }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:flex-end;gap:14px;height:150px;margin-top:18px">
+              <sc-for list="{{ divBars }}" as="b" hint-placeholder-count="6">
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:8px">
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#667085;font-weight:600">{{ b.valFmt }}</div>
+                  <div style="width:100%;max-width:46px;background:linear-gradient(180deg,#12B76A,#5FE3A1);border-radius:6px 6px 3px 3px;height:{{ b.h }}px"></div>
+                  <div style="font-size:11.5px;color:#98A2B3;font-weight:600">{{ b.label }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:20px;margin-top:14px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <div style="font-size:14.5px;font-weight:700">{{ topPositionsTitle }}</div>
+            <sc-if value="{{ chartFilterTipo }}" hint-placeholder-val="{{ false }}">
+              <button onclick="{{ onClearChartFilter }}" style="margin-left:auto;border:1px solid #E4E7EC;background:#fff;color:#667085;border-radius:20px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer">Limpar filtro ✕</button>
+            </sc-if>
+          </div>
+          <sc-raw-table style="width:100%;border-collapse:collapse">
+            <sc-raw-thead><sc-raw-tr>
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:9px 10px">Ativo</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:9px 10px">Valor atual</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:9px 10px">Rent.</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:9px 10px;width:34%">Participação</sc-raw-th>
+            </sc-raw-tr></sc-raw-thead>
+            <sc-raw-tbody>
+              <sc-for list="{{ topPositions }}" as="p" hint-placeholder-count="10">
+                <sc-raw-tr>
+                  <sc-raw-td style="padding:11px 10px;border-top:1px solid #F2F4F7">
+                    <div style="display:flex;align-items:center;gap:9px">
+                      <sc-if value="{{ p.hasLogo }}" hint-placeholder-val="{{ false }}">
+                        <img src="{{ p.logoUrl }}" style="width:20px;height:20px;border-radius:50%;object-fit:contain;background:#F7F8FA;flex-shrink:0;border:1px solid #EAECF2" />
+                      </sc-if>
+                      <sc-if value="{{ !p.hasLogo }}" hint-placeholder-val="{{ true }}">
+                        <div style="width:20px;height:20px;border-radius:50%;background:{{ p.tipoColor }};color:#fff;font-size:8.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">{{ p.initials }}</div>
+                      </sc-if>
+                      <span style="font-weight:700;font-size:13.5px">{{ p.ticker }}</span>
+                      <span style="font-size:11px;color:#98A2B3">{{ p.tipo }}</span>
+                    </div>
+                  </sc-raw-td>
+                  <sc-raw-td style="padding:11px 10px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px">{{ p.currentBRLFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:11px 10px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:{{ p.pnlColor }}">{{ p.pnlPctFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:11px 10px;border-top:1px solid #F2F4F7">
+                    <div style="display:flex;align-items:center;gap:9px">
+                      <div style="flex:1;height:7px;background:#F0F1F5;border-radius:4px;overflow:hidden"><div style="height:100%;background:{{ p.tipoColor }};width:{{ p.partPct }}%"></div></div>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#344054;width:44px;text-align:right">{{ p.partFmt }}</span>
+                    </div>
+                  </sc-raw-td>
+                </sc-raw-tr>
+              </sc-for>
+            </sc-raw-tbody>
+          </sc-raw-table>
+          <sc-if value="{{ noTopPositions }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:30px;text-align:center;color:#98A2B3;font-size:12.5px">Nenhuma posição para esse filtro</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== CARTEIRA ===== -->
+    <sc-if value="{{ isCarteira }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+          <sc-for list="{{ filters }}" as="f" hint-placeholder-count="6">
+            <button onclick="{{ f.onClick }}" style="border:1px solid {{ f.border }};background:{{ f.bg }};color:{{ f.color }};border-radius:20px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer">{{ f.label }}</button>
+          </sc-for>
+        </div>
+        <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;overflow:hidden">
+          <div style="overflow-x:auto">
+          <sc-raw-table style="width:100%;border-collapse:collapse;min-width:920px">
+            <sc-raw-thead><sc-raw-tr style="background:#FAFBFC">
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Ativo</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Qtd.</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Preço médio</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Cotação atual</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Investido</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Valor atual</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Rentab.</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;letter-spacing:.04em;padding:12px">Taxas</sc-raw-th>
+            </sc-raw-tr></sc-raw-thead>
+            <sc-raw-tbody>
+              <sc-for list="{{ positions }}" as="p" hint-placeholder-count="8">
+                <sc-raw-tr>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7">
+                    <div style="display:flex;align-items:center;gap:9px">
+                      <sc-if value="{{ p.hasLogo }}" hint-placeholder-val="{{ false }}">
+                        <img src="{{ p.logoUrl }}" style="width:22px;height:22px;border-radius:50%;object-fit:contain;background:#F7F8FA;flex-shrink:0;border:1px solid #EAECF2" />
+                      </sc-if>
+                      <sc-if value="{{ !p.hasLogo }}" hint-placeholder-val="{{ true }}">
+                        <div style="width:22px;height:22px;border-radius:50%;background:{{ p.tipoColor }};color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">{{ p.initials }}</div>
+                      </sc-if>
+                      <div>
+                        <div style="font-weight:700;font-size:13.5px">{{ p.ticker }}</div>
+                        <div style="font-size:11px;color:#98A2B3">{{ p.tipo }} · {{ p.moeda }}</div>
+                      </div>
+                    </div>
+                  </sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px">{{ p.qtyFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px">{{ p.avgFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right">
+                    <div style="display:flex;align-items:center;justify-content:flex-end;gap:3px">
+                      <span style="font-size:11px;color:#98A2B3">{{ p.simbolo }}</span>
+                      <input type="number" step="any" value="{{ p.price }}" onchange="{{ p.onPriceChange }}" style="width:80px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:5px 7px;border:1px solid #E4E7EC;border-radius:7px;background:#FAFBFC">
+                    </div>
+                  </sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px">{{ p.investedBRLFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right">
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600">{{ p.currentBRLFmt }}</div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#98A2B3">{{ p.currentNativeFmt }}</div>
+                  </sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right">
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;color:{{ p.pnlColor }}">{{ p.pnlPctFmt }}</div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{ p.pnlColor }}">{{ p.pnlBRLFmt }}</div>
+                  </sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#667085">{{ p.taxasFmt }}</sc-raw-td>
+                </sc-raw-tr>
+              </sc-for>
+            </sc-raw-tbody>
+          </sc-raw-table>
+          </div>
+          <sc-if value="{{ noPositions }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:40px;text-align:center;color:#98A2B3;font-size:14px">Nenhuma posição neste filtro.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== LANÇAMENTOS ===== -->
+    <sc-if value="{{ isLancamentos }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:center;margin-bottom:14px;gap:10px">
+          <div style="font-size:15px;font-weight:700">Histórico de operações</div>
+          <button onclick="{{ onSync }}" style="margin-left:auto;background:#fff;color:#344054;border:1px solid #E4E7EC;border-radius:9px;padding:9px 15px;font-size:13px;font-weight:600;cursor:pointer">⟳ Sincronizar planilha</button>
+          <button onclick="{{ onNovo }}" style="background:#2D5BFF;color:#fff;border:none;border-radius:9px;padding:9px 15px;font-size:13px;font-weight:700;cursor:pointer">＋ Novo lançamento</button>
+        </div>
+        <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;overflow:hidden">
+          <div style="overflow-x:auto">
+          <sc-raw-table style="width:100%;border-collapse:collapse;min-width:900px">
+            <sc-raw-thead><sc-raw-tr style="background:#FAFBFC">
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Data</sc-raw-th>
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Ativo</sc-raw-th>
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Operação</sc-raw-th>
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Corretora</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Qtd.</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Valor cota</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Taxas</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Total</sc-raw-th>
+              <sc-raw-th style="padding:12px"></sc-raw-th>
+            </sc-raw-tr></sc-raw-thead>
+            <sc-raw-tbody>
+              <sc-for list="{{ opsList }}" as="o" hint-placeholder-count="8">
+                <sc-raw-tr>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#344054">{{ o.dataFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;font-weight:700;font-size:13px">{{ o.ativo }}</sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7"><span style="background:{{ o.opBg }};color:{{ o.opColor }};padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:700">{{ o.operacao }}</span></sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;font-size:12.5px;color:#667085">{{ o.corretora }}</sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px">{{ o.qtyFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px">{{ o.cotaFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#667085">{{ o.taxasFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600">{{ o.totalFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:12px;border-top:1px solid #F2F4F7;text-align:right;white-space:nowrap">
+                    <button onclick="{{ o.onEdit }}" style="background:none;border:none;cursor:pointer;color:#2D5BFF;font-size:13px;font-weight:600;padding:4px 6px">Editar</button>
+                    <button onclick="{{ o.onDelete }}" style="background:none;border:none;cursor:pointer;color:#F04438;font-size:13px;font-weight:600;padding:4px 6px">Excluir</button>
+                  </sc-raw-td>
+                </sc-raw-tr>
+              </sc-for>
+            </sc-raw-tbody>
+          </sc-raw-table>
+          </div>
+          <sc-if value="{{ noOps }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:40px;text-align:center;color:#98A2B3;font-size:14px">Nenhum lançamento. Conecte sua planilha ou clique em “Novo lançamento”.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== PROVENTOS ===== -->
+    <sc-if value="{{ isProventos }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:16px">
+          <div style="background:#0B1220;color:#fff;border-radius:16px;padding:18px 20px">
+            <div style="font-size:12px;color:#98A2B3;font-weight:600">Total recebido (BRL)</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;margin-top:8px;color:#12B76A">R$ {{ kpiProventos }}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:18px 20px">
+            <div style="font-size:12px;color:#667085;font-weight:600">Yield sobre custo</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;margin-top:8px">{{ yieldFmt }}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;padding:18px 20px">
+            <div style="font-size:12px;color:#667085;font-weight:600">Nº de pagamentos</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;margin-top:8px">{{ provCount }}</div>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #EAECF2;border-radius:16px;overflow:hidden">
+          <sc-raw-table style="width:100%;border-collapse:collapse">
+            <sc-raw-thead><sc-raw-tr style="background:#FAFBFC">
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Data</sc-raw-th>
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Ativo</sc-raw-th>
+              <sc-raw-th style="text-align:left;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Corretora</sc-raw-th>
+              <sc-raw-th style="text-align:right;font-size:11px;font-weight:600;color:#667085;text-transform:uppercase;padding:12px">Valor</sc-raw-th>
+              <sc-raw-th style="padding:12px"></sc-raw-th>
+            </sc-raw-tr></sc-raw-thead>
+            <sc-raw-tbody>
+              <sc-for list="{{ proventosList }}" as="o" hint-placeholder-count="4">
+                <sc-raw-tr>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#344054">{{ o.dataFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;font-weight:700;font-size:13px">{{ o.ativo }}</sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;font-size:12.5px;color:#667085">{{ o.corretora }}</sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#12B76A">{{ o.totalFmt }}</sc-raw-td>
+                  <sc-raw-td style="padding:13px 12px;border-top:1px solid #F2F4F7;text-align:right"><button onclick="{{ o.onDelete }}" style="background:none;border:none;cursor:pointer;color:#F04438;font-size:13px;font-weight:600">Excluir</button></sc-raw-td>
+                </sc-raw-tr>
+              </sc-for>
+            </sc-raw-tbody>
+          </sc-raw-table>
+          <sc-if value="{{ noProv }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:40px;text-align:center;color:#98A2B3;font-size:14px">Nenhum provento lançado.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- ===== MODAL: FORM ===== -->
+  <sc-if value="{{ showForm }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;background:rgba(11,18,32,.55);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;animation:fadein .15s ease">
+      <div style="background:#fff;border-radius:18px;width:100%;max-width:560px;padding:26px;animation:popin .2s ease;box-shadow:0 24px 60px rgba(0,0,0,.3)">
+        <div style="display:flex;align-items:center;margin-bottom:20px">
+          <div style="font-size:18px;font-weight:800">{{ formTitle }}</div>
+          <button onclick="{{ onCloseForm }}" style="margin-left:auto;background:#F2F4F7;border:none;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;color:#667085">✕</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Tipo de investimento</label>
+            <select value="{{ form.tipoInvest }}" onchange="{{ h.tipoInvest }}" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px;background:#fff">
+              <option>Ações BR</option><option>FIIs</option><option>Renda Fixa</option><option>Stocks EUA</option><option>Cripto</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Operação</label>
+            <select value="{{ form.operacao }}" onchange="{{ h.operacao }}" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px;background:#fff">
+              <option>COMPRA</option><option>VENDA</option><option>PROVENTO</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Ativo (ticker)</label>
+            <input value="{{ form.ativo }}" onchange="{{ h.ativo }}" placeholder="PETR4" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px;text-transform:uppercase">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Corretora</label>
+            <input value="{{ form.corretora }}" onchange="{{ h.corretora }}" placeholder="XP, Rico..." style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Data</label>
+            <input type="date" value="{{ form.data }}" onchange="{{ h.data }}" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Quantidade</label>
+            <input type="number" step="any" value="{{ form.quantidade }}" onchange="{{ h.quantidade }}" placeholder="100" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Valor da cota ({{ form.simbolo }})</label>
+            <input type="number" step="any" value="{{ form.valorCota }}" onchange="{{ h.valorCota }}" placeholder="0,00" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Taxas ({{ form.simbolo }})</label>
+            <input type="number" step="any" value="{{ form.taxas }}" onchange="{{ h.taxas }}" placeholder="0,00" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px">
+          </div>
+          <sc-if value="{{ showPtax }}" hint-placeholder-val="{{ false }}">
+            <div style="grid-column:1 / -1;background:#F9FAFB;border:1px solid #EAECF2;border-radius:10px;padding:12px;display:flex;align-items:flex-end;gap:10px">
+              <div style="flex:1">
+                <label style="font-size:12px;font-weight:600;color:#344054;display:block;margin-bottom:5px">Dólar PTAX da data</label>
+                <input type="number" step="any" value="{{ form.ptax }}" onchange="{{ h.ptax }}" placeholder="5,00" style="width:100%;padding:9px 10px;border:1px solid #E4E7EC;border-radius:9px;font-size:13.5px">
+              </div>
+              <button onclick="{{ onBuscarPtax }}" style="background:#0B1220;color:#fff;border:none;border-radius:9px;padding:10px 14px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap">Buscar PTAX (BCB)</button>
+            </div>
+          </sc-if>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:16px;background:#F0F4FF;border-radius:10px;padding:12px 14px">
+          <span style="font-size:13px;color:#344054;font-weight:600">Valor total da operação</span>
+          <span style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:700;color:#2D5BFF">{{ formTotalPreview }}</span>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button onclick="{{ onCloseForm }}" style="flex:1;background:#fff;color:#344054;border:1px solid #E4E7EC;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer">Cancelar</button>
+          <button onclick="{{ onSaveForm }}" style="flex:2;background:#2D5BFF;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer">{{ saveLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== MODAL: CONEXÃO ===== -->
+  <sc-if value="{{ showConnect }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;background:rgba(11,18,32,.55);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;animation:fadein .15s ease">
+      <div style="background:#fff;border-radius:18px;width:100%;max-width:640px;padding:26px;animation:popin .2s ease;box-shadow:0 24px 60px rgba(0,0,0,.3)">
+        <div style="display:flex;align-items:center;margin-bottom:6px">
+          <div style="font-size:18px;font-weight:800">Conectar Google Sheets</div>
+          <button onclick="{{ onCloseConnect }}" style="margin-left:auto;background:#F2F4F7;border:none;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;color:#667085">✕</button>
+        </div>
+        <div style="font-size:13px;color:#667085;line-height:1.55;margin-bottom:16px">Sincronização de mão dupla: o que você lançar aqui é gravado na planilha, e o que você digitar direto na planilha aparece aqui. O conector lê <b>todas as abas</b> com coluna “Ativo” — abas com “dólar/usd” no nome viram investimentos em dólar; as demais, em real.</div>
+
+        <div style="background:#F9FAFB;border:1px solid #EAECF2;border-radius:12px;padding:16px">
+          <div style="font-size:13.5px;font-weight:700;margin-bottom:10px">Passo 1 — Instalar o conector (uma vez)</div>
+          <ol style="margin:0;padding-left:18px;font-size:12.5px;color:#344054;line-height:1.7">
+            <li>Na planilha: menu <b>Extensões › Apps Script</b>.</li>
+            <li>Apague tudo, cole o código abaixo e salve.</li>
+            <li>Primeira vez: <b>Implantar › Nova implantação › App da Web</b> — Executar como <b>Eu</b>, acesso <b>Qualquer pessoa</b>. Copie a URL (termina em <b>/exec</b>).</li>
+            <li>Já tinha instalado? <b>Implantar › Gerenciar implantações › (lápis) › Versão: Nova versão › Implantar</b> — a URL continua a mesma.</li>
+          </ol>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+            <button onclick="{{ onCopyCode }}" style="background:#0B1220;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer">{{ copyLabel }}</button>
+            <span style="font-size:12px;color:#98A2B3">arquivo também salvo no projeto: conector-google-sheets.gs</span>
+          </div>
+          <pre style="margin:12px 0 0;background:#0B1220;color:#C9D6EA;border-radius:10px;padding:14px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.5;max-height:200px;overflow:auto;white-space:pre">{{ appsScriptCode }}</pre>
+        </div>
+
+        <div style="margin-top:18px">
+          <div style="font-size:13.5px;font-weight:700;margin-bottom:8px">Passo 2 — Colar a URL do App da Web</div>
+          <input value="{{ sheetUrlInput }}" onchange="{{ onSheetUrlChange }}" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%;padding:11px 12px;border:1px solid #E4E7EC;border-radius:10px;font-size:13px;font-family:'IBM Plex Mono',monospace">
+          <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+            <button onclick="{{ onSaveConnection }}" style="background:#12B76A;color:#fff;border:none;border-radius:10px;padding:11px 18px;font-size:13.5px;font-weight:700;cursor:pointer">Conectar e sincronizar</button>
+            <sc-if value="{{ connected }}" hint-placeholder-val="{{ false }}">
+              <button onclick="{{ onDisconnect }}" style="background:#fff;color:#B42318;border:1px solid #FDA29B;border-radius:10px;padding:11px 18px;font-size:13.5px;font-weight:600;cursor:pointer">Desconectar</button>
+            </sc-if>
+          </div>
+          <sc-if value="{{ connMsg }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:14px;background:{{ connMsgBg }};border:1px solid {{ connMsgBorder }};color:{{ connMsgColor }};border-radius:10px;padding:12px 14px;font-size:13px">{{ connMsg }}</div>
+          </sc-if>
+          <div style="display:flex;align-items:center;gap:9px;margin-top:16px">
+            <input type="checkbox" checked="{{ autoSync }}" onchange="{{ onToggleAutoSync }}" style="width:16px;height:16px;cursor:pointer">
+            <span style="font-size:12.5px;color:#344054">Sincronizar automaticamente a cada 30 segundos</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.cats = {
+      'Ações BR': { color: '#2D5BFF', moeda: 'BRL' },
+      'FIIs': { color: '#12B76A', moeda: 'BRL' },
+      'Renda Fixa': { color: '#7A5AF8', moeda: 'BRL' },
+      'Stocks EUA': { color: '#F79009', moeda: 'USD' },
+      'Cripto': { color: '#F63D68', moeda: 'USD' },
+    };
+    this.LOGO_DOMAINS = {
+      PETR3: 'petrobras.com.br', PETR4: 'petrobras.com.br',
+      VALE3: 'vale.com',
+      ITUB3: 'itau.com.br', ITUB4: 'itau.com.br', ITSA3: 'itausa.com.br', ITSA4: 'itausa.com.br',
+      BBDC3: 'bradesco.com.br', BBDC4: 'bradesco.com.br',
+      BBAS3: 'bb.com.br', SANB11: 'santander.com.br',
+      ABEV3: 'ambev.com.br', WEGE3: 'weg.net', MGLU3: 'magazineluiza.com.br',
+      RENT3: 'localiza.com', SUZB3: 'suzano.com.br', B3SA3: 'b3.com.br',
+      JBSS3: 'jbs.com.br', RADL3: 'raiadrogasil.com.br', EQTL3: 'equatorialenergia.com.br',
+      GGBR4: 'gerdau.com', CSAN3: 'cosan.com.br', ELET3: 'eletrobras.com', ELET6: 'eletrobras.com',
+      HAPV3: 'hapvida.com.br', CPLE6: 'copel.com', CPFE3: 'cpfl.com.br', TAEE11: 'taesa.com.br',
+      KLBN11: 'klabin.com.br', BRFS3: 'brf-global.com', CSNA3: 'csn.com.br', UGPA3: 'ultra.com.br',
+      RAIL3: 'rumolog.com', PRIO3: 'prio3.com.br', VIVT3: 'telefonica.com.br', TIMS3: 'tim.com.br',
+      AAPL: 'apple.com', MSFT: 'microsoft.com', GOOGL: 'abc.xyz', GOOG: 'abc.xyz',
+      AMZN: 'amazon.com', TSLA: 'tesla.com', META: 'meta.com', NVDA: 'nvidia.com',
+      NFLX: 'netflix.com', DIS: 'disney.com', KO: 'coca-colacompany.com', PEP: 'pepsico.com',
+      V: 'visa.com', MA: 'mastercard.com', JPM: 'jpmorganchase.com', BAC: 'bankofamerica.com',
+      INTC: 'intel.com', AMD: 'amd.com', ORCL: 'oracle.com', ADBE: 'adobe.com', CRM: 'salesforce.com',
+      PYPL: 'paypal.com', UBER: 'uber.com', ABNB: 'airbnb.com', SBUX: 'starbucks.com',
+    };
+    this.CRYPTO_ICON = { BTC: 'btc', ETH: 'eth', SOL: 'sol', ADA: 'ada', BNB: 'bnb', DOGE: 'doge', XRP: 'xrp', USDT: 'usdt', USDC: 'usdc', LTC: 'ltc', DOT: 'dot', LINK: 'link', AVAX: 'avax', MATIC: 'matic' };
+    this.APPS_SCRIPT = this.buildAppsScriptV3();
+    this.tabInfo = {};
+    this.KNOWN_TABS = ['Lançamentos R$', 'Lançamentos U$'];
+    this.SHEET_ID = '1CVacH71CdWEKdBP-LOtCl5K4Iy7nKGtF6KiyVoczUbA';
+    this.state = {
+      tab: 'overview',
+      ops: [],
+      quotes: {},
+      usdBrl: 5.42,
+      filter: 'Todos',
+      hoverTipo: null,
+      chartFilterTipo: null,
+      form: this.blankForm(),
+      showForm: false,
+      msg: '',
+      // sync
+      sheetUrl: '',
+      sheetUrlInput: '',
+      connected: false,
+      syncing: false,
+      autoSync: true,
+      lastSync: '',
+      showConnect: false,
+      connMsg: '',
+      connState: '',
+      copyLabel: 'Copiar código',
+    };
+  }
+
+  blankForm() {
+    return { editId: null, editAba: null, tipoInvest: 'Ações BR', operacao: 'COMPRA', corretora: '', ativo: '',
+      data: new Date().toISOString().slice(0, 10), quantidade: '', valorCota: '', taxas: '', ptax: '' };
+  }
+
+  componentDidMount() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('inv_dash_v2')); } catch (e) {}
+    if (saved) {
+      this.setState({
+        ops: saved.ops || [], quotes: saved.quotes || {}, usdBrl: saved.usdBrl || 5.42,
+        sheetUrl: saved.sheetUrl || '', sheetUrlInput: saved.sheetUrl || '',
+        connected: !!saved.sheetUrl, autoSync: saved.autoSync !== false,
+      }, () => { if (this.state.sheetUrl) this.pullFromSheet(true); });
+    } else {
+      const seed = this.seedData();
+      this.setState({ ops: seed.ops, quotes: seed.quotes }, () => this.persist());
+    }
+    this.fetchPtaxFor(new Date().toISOString().slice(0, 10)).then(v => {
+      if (v) this.setState({ usdBrl: v }, () => this.persist());
+    });
+    this._poll = setInterval(() => {
+      if (this.state.sheetUrl && this.state.autoSync && !this.state.syncing && !this.state.showForm)
+        this.pullFromSheet(true);
+    }, 30000);
+  }
+  componentWillUnmount() { if (this._poll) clearInterval(this._poll); }
+
+  persist() {
+    try {
+      localStorage.setItem('inv_dash_v2', JSON.stringify({
+        ops: this.state.ops, quotes: this.state.quotes, usdBrl: this.state.usdBrl,
+        sheetUrl: this.state.sheetUrl, autoSync: this.state.autoSync,
+      }));
+    } catch (e) {}
+  }
+
+  seedData() {
+    const uid = () => Math.random().toString(36).slice(2, 9);
+    const ops = [
+      { id: uid(), tipoInvest: 'Ações BR', operacao: 'COMPRA', corretora: 'BRADESCO', ativo: 'PETR4', data: '2024-09-10', quantidade: 26, valorCota: 24.55, taxas: 0.5, valorTotal: 638.8, moeda: 'BRL', ptax: null },
+      { id: uid(), tipoInvest: 'Ações BR', operacao: 'COMPRA', corretora: 'RICO', ativo: 'BBAS3', data: '2024-11-18', quantidade: 400, valorCota: 21.45, taxas: 2.76, valorTotal: 8582.76, moeda: 'BRL', ptax: null },
+      { id: uid(), tipoInvest: 'FIIs', operacao: 'COMPRA', corretora: 'RICO', ativo: 'MXRF11', data: '2025-01-20', quantidade: 300, valorCota: 10.35, taxas: 2.5, valorTotal: 3107.5, moeda: 'BRL', ptax: null },
+      { id: uid(), tipoInvest: 'Stocks EUA', operacao: 'COMPRA', corretora: 'AVENUE', ativo: 'AAPL', data: '2025-03-18', quantidade: 15, valorCota: 205.0, taxas: 1.0, valorTotal: 3076.0, moeda: 'USD', ptax: 5.85 },
+      { id: uid(), tipoInvest: 'Cripto', operacao: 'COMPRA', corretora: 'BINANCE', ativo: 'BTC', data: '2025-02-25', quantidade: 0.05, valorCota: 62000.0, taxas: 15.0, valorTotal: 3115.0, moeda: 'USD', ptax: 5.75 },
+      { id: uid(), tipoInvest: 'Ações BR', operacao: 'PROVENTO', corretora: 'BRADESCO', ativo: 'PETR4', data: '2025-05-15', quantidade: 0, valorCota: 0, taxas: 0, valorTotal: 210.5, moeda: 'BRL', ptax: null },
+    ];
+    const quotes = { PETR4: 32.1, BBAS3: 27.2, MXRF11: 10.2, AAPL: 228.0, BTC: 68000.0 };
+    return { ops, quotes };
+  }
+
+  // ---------- formatters ----------
+  fmt(n, d) { d = d == null ? 2 : d; return (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+  fmtQty(n) { return (Number(n) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 8 }); }
+  fmtPct(n) { return (n >= 0 ? '+' : '') + (n * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%'; }
+  fmtK(n) { n = Number(n) || 0; if (n >= 1000) return (n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k'; return this.fmt(n, 0); }
+  logoFor(ticker, tipo) {
+    const t = (ticker || '').toUpperCase().trim();
+    if (!t) return null;
+    if (tipo === 'Cripto' && this.CRYPTO_ICON[t]) return 'https://assets.coincap.io/assets/icons/' + this.CRYPTO_ICON[t] + '@2x.png';
+    const domain = this.LOGO_DOMAINS[t];
+    if (domain) return 'https://logo.clearbit.com/' + domain;
+    return null;
+  }
+
+  // ---------- parsing helpers ----------
+  norm(s) { return (s + '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+  parseNum(s) {
+    if (s == null || s === '') return 0;
+    if (typeof s === 'number') return s;
+    let t = (s + '').replace(/[^0-9,.\-]/g, '');
+    if (t.indexOf(',') > -1 && t.indexOf('.') > -1) t = t.replace(/\./g, '').replace(',', '.');
+    else if (t.indexOf(',') > -1) t = t.replace(',', '.');
+    return parseFloat(t) || 0;
+  }
+  parseDate(s) {
+    if (!s) return new Date().toISOString().slice(0, 10);
+    s = (s + '').trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (m) { let y = m[3]; if (y.length === 2) y = '20' + y; return y + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
+    const dt = new Date(s); if (!isNaN(dt)) return dt.toISOString().slice(0, 10);
+    return new Date().toISOString().slice(0, 10);
+  }
+  inferTipo(t) {
+    const s = (t || '').toUpperCase().trim();
+    if (/TESOURO|SELIC|IPCA|CDB|LCI|LCA|DEBENT|PREFIX|RENDA FIXA/.test(s)) return 'Renda Fixa';
+    if (/^(BTC|ETH|SOL|ADA|BNB|XRP|DOGE|LTC|DOT|MATIC|USDT|USDC|LINK|AVAX)$/.test(s)) return 'Cripto';
+    if (/^[A-Z]{4}11$/.test(s)) return 'FIIs';
+    if (/^[A-Z]{4}\d{1,2}$/.test(s)) return 'Ações BR';
+    if (/^[A-Z]{1,5}$/.test(s)) return 'Stocks EUA';
+    return 'Ações BR';
+  }
+  detectOp(s) {
+    const n = this.norm(s);
+    if (/vend|sell|resgate/.test(n)) return 'VENDA';
+    if (/prov|divid|jcp|rendiment|yield/.test(n)) return 'PROVENTO';
+    return 'COMPRA';
+  }
+
+  // ---------- data / computations ----------
+  getData() {
+    const ops = (this.state.ops || []).slice().sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+    const quotes = this.state.quotes || {};
+    const usd = this.state.usdBrl || 5.42;
+    const map = {};
+    const proventos = [];
+    let totalTaxas = 0;
+
+    for (const op of ops) {
+      totalTaxas += Number(op.taxas) || 0;
+      if (op.operacao === 'PROVENTO') { proventos.push(op); continue; }
+      const key = (op.ativo || '').toUpperCase();
+      if (!key) continue;
+      if (!map[key]) map[key] = { ticker: key, tipo: op.tipoInvest, moeda: op.moeda || (this.cats[op.tipoInvest] ? this.cats[op.tipoInvest].moeda : 'BRL'), qty: 0, cost: 0, investedBRL: 0, taxas: 0 };
+      const p = map[key];
+      const q = Number(op.quantidade) || 0;
+      const total = Number(op.valorTotal) || 0;
+      const ptax = p.moeda === 'USD' ? (Number(op.ptax) || usd) : 1;
+      p.taxas += Number(op.taxas) || 0;
+      if (op.operacao === 'VENDA') {
+        const avg = p.qty > 0 ? p.cost / p.qty : 0;
+        const avgBRL = p.qty > 0 ? p.investedBRL / p.qty : 0;
+        p.qty -= q; p.cost -= avg * q; p.investedBRL -= avgBRL * q;
+      } else {
+        p.qty += q; p.cost += total;
+        p.investedBRL += (p.moeda === 'USD' && Number(op.valorTotalBRL) > 0) ? Number(op.valorTotalBRL) : total * ptax;
+      }
+    }
+
+    let positions = Object.values(map).filter(p => p.qty > 1e-9).map(p => {
+      const avg = p.qty > 0 ? p.cost / p.qty : 0;
+      const raw = quotes[p.ticker];
+      const price = (raw != null && raw !== '') ? Number(raw) : avg;
+      const currentNative = p.qty * price;
+      const currentBRL = p.moeda === 'USD' ? currentNative * usd : currentNative;
+      const investedBRL = p.investedBRL;
+      const pnlBRL = currentBRL - investedBRL;
+      const pnlPct = investedBRL > 0 ? pnlBRL / investedBRL : 0;
+      const investedUSD = p.moeda === 'USD' ? p.cost : 0;
+      const currentUSD = p.moeda === 'USD' ? currentNative : 0;
+      return { ...p, avg, price, currentNative, currentBRL, investedBRL, pnlBRL, pnlPct, investedUSD, currentUSD };
+    }).sort((a, b) => b.currentBRL - a.currentBRL);
+
+    const totalPat = positions.reduce((s, p) => s + p.currentBRL, 0) || 1;
+    const totalInvested = positions.reduce((s, p) => s + p.investedBRL, 0);
+    const patUSD = positions.filter(p => p.moeda === 'USD').reduce((s, p) => s + p.currentNative, 0);
+    const investedUSD = positions.filter(p => p.moeda === 'USD').reduce((s, p) => s + p.cost, 0);
+    const investedUSDbrl = positions.filter(p => p.moeda === 'USD').reduce((s, p) => s + p.investedBRL, 0);
+    const provTotal = proventos.reduce((s, o) => {
+      const t = Number(o.valorTotal) || 0;
+      return s + (o.moeda === 'USD' ? t * (Number(o.ptax) || usd) : t);
+    }, 0);
+
+    const byTipo = {};
+    positions.forEach(p => { byTipo[p.tipo] = (byTipo[p.tipo] || 0) + p.currentBRL; });
+
+    const byMonthProv = {};
+    proventos.forEach(op => {
+      const m = (op.data || '').slice(0, 7);
+      if (!m) return;
+      const ptax = (op.moeda === 'USD') ? (Number(op.ptax) || usd) : 1;
+      byMonthProv[m] = (byMonthProv[m] || 0) + (Number(op.valorTotal) || 0) * ptax;
+    });
+
+    let cum = 0;
+    const evo = [];
+    ops.forEach(op => {
+      if (op.operacao === 'PROVENTO') return;
+      const ptax = (op.moeda === 'USD') ? (Number(op.ptax) || usd) : 1;
+      const total = (Number(op.valorTotal) || 0) * ptax;
+      cum += op.operacao === 'VENDA' ? -total : total;
+      evo.push(cum);
+    });
+
+    return { ops, positions, proventos, totalPat, totalInvested, totalTaxas, patUSD, investedUSD, investedUSDbrl, provTotal, byTipo, byMonthProv, evo, usd };
+  }
+
+  // ---------- render ----------
+  renderVals() {
+    const d = this.getData();
+    const setTab = (t) => () => this.setState({ tab: t });
+    const tabsDef = [['overview', 'Visão geral'], ['carteira', 'Carteira'], ['lancamentos', 'Lançamentos'], ['proventos', 'Proventos']];
+    const tabs = tabsDef.map(([k, label]) => {
+      const active = this.state.tab === k;
+      return { label, onClick: setTab(k), weight: active ? 700 : 500, color: active ? '#2D5BFF' : '#667085', border: active ? '#2D5BFF' : 'transparent' };
+    });
+
+    const rentPct = d.totalInvested > 0 ? (d.totalPat - d.totalInvested) / d.totalInvested : 0;
+    const rentBRL = d.totalPat - d.totalInvested;
+    const up = rentPct >= 0;
+
+    const C = 2 * Math.PI * 52;
+    const tipoOrder = Object.keys(this.cats).filter(t => d.byTipo[t]);
+    const donutTotal = tipoOrder.reduce((s, t) => s + d.byTipo[t], 0) || 1;
+    const hoverT = this.state.hoverTipo;
+    const activeT = hoverT || this.state.chartFilterTipo;
+    let acc = 0;
+    const donutSlices = tipoOrder.map(t => {
+      const frac = d.byTipo[t] / donutTotal;
+      const len = frac * C;
+      const dimmed = activeT && activeT !== t;
+      const slice = {
+        color: this.cats[t].color, dash: len.toFixed(2) + ' ' + (C - len).toFixed(2), offset: (-acc).toFixed(2),
+        width: activeT === t ? 19 : 15, opacity: dimmed ? 0.35 : 1,
+        onMouseEnter: () => this.setState({ hoverTipo: t }),
+        onMouseLeave: () => this.setState({ hoverTipo: null }),
+        onClick: () => this.setState({ chartFilterTipo: this.state.chartFilterTipo === t ? null : t }),
+      };
+      acc += len;
+      return slice;
+    });
+    const legend = tipoOrder.map(t => {
+      const dimmed = activeT && activeT !== t;
+      return {
+        color: this.cats[t].color, label: t, pct: (d.byTipo[t] / donutTotal * 100).toFixed(1) + '%',
+        opacity: dimmed ? 0.4 : 1, weight: this.state.chartFilterTipo === t ? 700 : 500,
+        onMouseEnter: () => this.setState({ hoverTipo: t }),
+        onMouseLeave: () => this.setState({ hoverTipo: null }),
+        onClick: () => this.setState({ chartFilterTipo: this.state.chartFilterTipo === t ? null : t }),
+      };
+    });
+    const donutCenterLabel = hoverT || 'Total';
+    const donutCenterValue = hoverT ? this.fmtK(d.byTipo[hoverT] || 0) : this.fmtK(donutTotal);
+
+    const monLabels = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    const provMonths = Object.keys(d.byMonthProv).sort().slice(-6);
+    const maxProv = Math.max(1, ...provMonths.map(m => d.byMonthProv[m]));
+    const divBars = provMonths.map(m => {
+      const v = d.byMonthProv[m];
+      const mi = parseInt(m.slice(5, 7), 10) - 1;
+      return { label: monLabels[mi] + '/' + m.slice(2, 4), valFmt: this.fmtK(v), h: Math.max(4, Math.round(v / maxProv * 118)) };
+    });
+    const noDivBars = divBars.length === 0;
+
+    const evo = d.evo.length ? d.evo : [0];
+    const maxEvo = Math.max(1, ...evo);
+    const n = evo.length;
+    const pt = (i, v) => {
+      const x = n > 1 ? (i / (n - 1)) * 300 : 150;
+      const y = 118 - (v / maxEvo) * 108;
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    };
+    let linePath = 'M' + evo.map((v, i) => pt(i, v)).join(' L');
+    const areaPath = linePath + ' L300,120 L0,120 Z';
+
+    const mkPos = (p) => ({
+      ticker: p.ticker, tipo: p.tipo, moeda: p.moeda, tipoColor: (this.cats[p.tipo] || {}).color || '#98A2B3',
+      logoUrl: this.logoFor(p.ticker, p.tipo), hasLogo: !!this.logoFor(p.ticker, p.tipo), initials: (p.ticker || '').replace(/[^A-Z0-9]/gi, '').slice(0, 2).toUpperCase(),
+      simbolo: p.moeda === 'USD' ? 'US$' : 'R$',
+      qtyFmt: this.fmtQty(p.qty),
+      avgFmt: (p.moeda === 'USD' ? 'US$ ' : 'R$ ') + this.fmt(p.avg),
+      price: p.price,
+      investedBRLFmt: 'R$ ' + this.fmt(p.investedBRL),
+      currentBRLFmt: 'R$ ' + this.fmt(p.currentBRL),
+      currentNativeFmt: p.moeda === 'USD' ? 'US$ ' + this.fmt(p.currentNative) : '',
+      pnlPctFmt: this.fmtPct(p.pnlPct),
+      pnlBRLFmt: (p.pnlBRL >= 0 ? '+' : '') + 'R$ ' + this.fmt(Math.abs(p.pnlBRL)),
+      pnlColor: p.pnlBRL >= 0 ? '#12B76A' : '#F04438',
+      taxasFmt: 'R$ ' + this.fmt(p.taxas),
+      partPct: (p.currentBRL / d.totalPat * 100).toFixed(1),
+      partFmt: (p.currentBRL / d.totalPat * 100).toFixed(1) + '%',
+      onPriceChange: (e) => this.updateQuote(p.ticker, e.target.value),
+    });
+    const posForTop = this.state.chartFilterTipo ? d.positions.filter(p => p.tipo === this.state.chartFilterTipo) : d.positions;
+    const topPositions = posForTop.slice(0, 10).map(mkPos);
+    const topPositionsTitle = this.state.chartFilterTipo ? ('Maiores posições — ' + this.state.chartFilterTipo) : 'Maiores posições';
+    const noTopPositions = topPositions.length === 0;
+
+    const filterList = ['Todos', 'Ações BR', 'FIIs', 'Renda Fixa', 'Stocks EUA', 'Cripto', 'BRL', 'USD'];
+    const filters = filterList.map(f => {
+      const active = this.state.filter === f;
+      return { label: f, onClick: () => this.setState({ filter: f }),
+        border: active ? '#2D5BFF' : '#E4E7EC', bg: active ? '#2D5BFF' : '#fff', color: active ? '#fff' : '#344054' };
+    });
+    let filtered = d.positions;
+    const fl = this.state.filter;
+    if (fl === 'BRL') filtered = d.positions.filter(p => p.moeda === 'BRL');
+    else if (fl === 'USD') filtered = d.positions.filter(p => p.moeda === 'USD');
+    else if (fl !== 'Todos') filtered = d.positions.filter(p => p.tipo === fl);
+    const positions = filtered.map(mkPos);
+
+    const opBadge = { COMPRA: ['#ECFDF3', '#027A48'], VENDA: ['#FEF3F2', '#B42318'], PROVENTO: ['#EFF4FF', '#2D5BFF'] };
+    const opsSorted = (this.state.ops || []).slice().sort((a, b) => (a.data < b.data ? 1 : -1));
+    const fmtDate = (s) => { if (!s) return ''; const p = s.split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s; };
+    const opsList = opsSorted.filter(o => o.operacao !== 'PROVENTO').map(o => ({
+      dataFmt: fmtDate(o.data), ativo: (o.ativo || '').toUpperCase(), operacao: o.operacao,
+      opBg: (opBadge[o.operacao] || ['#F2F4F7', '#667085'])[0], opColor: (opBadge[o.operacao] || ['#F2F4F7', '#667085'])[1],
+      corretora: o.corretora || '—',
+      qtyFmt: this.fmtQty(o.quantidade),
+      cotaFmt: (o.moeda === 'USD' ? 'US$ ' : 'R$ ') + this.fmt(o.valorCota),
+      taxasFmt: (o.moeda === 'USD' ? 'US$ ' : 'R$ ') + this.fmt(o.taxas),
+      totalFmt: (o.moeda === 'USD' ? 'US$ ' : 'R$ ') + this.fmt(o.valorTotal),
+      onEdit: () => this.openForm(o), onDelete: () => this.deleteOp(o.id),
+    }));
+    const proventosList = opsSorted.filter(o => o.operacao === 'PROVENTO').map(o => ({
+      dataFmt: fmtDate(o.data), ativo: (o.ativo || '').toUpperCase(), corretora: o.corretora || '—',
+      totalFmt: (o.moeda === 'USD' ? 'US$ ' : 'R$ ') + this.fmt(o.valorTotal),
+      onDelete: () => this.deleteOp(o.id),
+    }));
+
+    const f = this.state.form;
+    const moeda = (this.cats[f.tipoInvest] || {}).moeda || 'BRL';
+    const q = parseFloat((f.quantidade + '').replace(',', '.')) || 0;
+    const vc = parseFloat((f.valorCota + '').replace(',', '.')) || 0;
+    const tx = parseFloat((f.taxas + '').replace(',', '.')) || 0;
+    let prevTotal;
+    if (f.operacao === 'PROVENTO') prevTotal = vc || q * vc;
+    else prevTotal = f.operacao === 'VENDA' ? q * vc - tx : q * vc + tx;
+    const formSym = moeda === 'USD' ? 'US$' : 'R$';
+
+    // sync pill
+    let syncDot = '#98A2B3', syncPillText = 'Local (não conectado)', syncPillBg = '#141d30', syncPillBorder = '#22304d';
+    if (this.state.syncing) { syncDot = '#F79009'; syncPillText = 'Sincronizando…'; }
+    else if (this.state.connected) { syncDot = '#12B76A'; syncPillText = 'Conectado' + (this.state.lastSync ? ' · ' + this.state.lastSync : ''); }
+    const connOk = this.state.connState === 'ok';
+    const connErr = this.state.connState === 'err';
+
+    return {
+      tabs, msg: this.state.msg,
+      usdBrlFmt: this.fmt(d.usd),
+      isOverview: this.state.tab === 'overview',
+      isCarteira: this.state.tab === 'carteira',
+      isLancamentos: this.state.tab === 'lancamentos',
+      isProventos: this.state.tab === 'proventos',
+      kpiPatrimonio: this.fmt(d.totalPat), kpiInvestido: this.fmt(d.totalInvested),
+      kpiRentBRL: (rentBRL >= 0 ? '' : '-') + this.fmt(Math.abs(rentBRL)), kpiRentPct: this.fmtPct(rentPct),
+      rentColor: up ? '#12B76A' : '#F04438', rentBg: up ? 'rgba(18,183,106,.18)' : 'rgba(240,68,56,.18)', rentArrow: up ? '▲' : '▼',
+      kpiProventos: this.fmt(d.provTotal),
+      kpiPatrimonioUSD: this.fmt(d.patUSD), kpiPatrimonioUSDbrl: this.fmt(d.patUSD * d.usd),
+      kpiInvestidoUSD: this.fmt(d.investedUSD),
+      kpiResultUSDpct: this.fmtPct(d.investedUSD > 0 ? (d.patUSD - d.investedUSD) / d.investedUSD : 0),
+      colorUSD: (d.patUSD - d.investedUSD) >= 0 ? '#12B76A' : '#F04438',
+      donutSlices, donutTotalK: this.fmtK(donutTotal), donutCenterLabel, donutCenterValue, legend, divBars, noDivBars, areaPath, linePath,
+      topPositions, topPositionsTitle, noTopPositions, chartFilterTipo: this.state.chartFilterTipo,
+      onClearChartFilter: () => this.setState({ chartFilterTipo: null }),
+      filters, positions, noPositions: positions.length === 0,
+      opsList, noOps: opsList.length === 0,
+      proventosList, noProv: proventosList.length === 0,
+      yieldFmt: d.totalInvested > 0 ? (d.provTotal / d.totalInvested * 100).toFixed(2) + '%' : '0,00%',
+      provCount: d.proventos.length,
+      // form
+      showForm: this.state.showForm, form: { ...f, simbolo: formSym },
+      formTitle: f.editId ? 'Editar lançamento' : 'Novo lançamento',
+      formTotalPreview: formSym + ' ' + this.fmt(prevTotal),
+      showPtax: moeda === 'USD',
+      saveLabel: this.state.sheetUrl ? 'Salvar na planilha' : 'Salvar lançamento',
+      h: {
+        tipoInvest: (e) => this.setForm('tipoInvest', e.target.value),
+        operacao: (e) => this.setForm('operacao', e.target.value),
+        corretora: (e) => this.setForm('corretora', e.target.value),
+        ativo: (e) => this.setForm('ativo', e.target.value),
+        data: (e) => this.setForm('data', e.target.value),
+        quantidade: (e) => this.setForm('quantidade', e.target.value),
+        valorCota: (e) => this.setForm('valorCota', e.target.value),
+        taxas: (e) => this.setForm('taxas', e.target.value),
+        ptax: (e) => this.setForm('ptax', e.target.value),
+      },
+      onNovo: () => this.openForm(null),
+      onCloseForm: () => this.setState({ showForm: false }),
+      onSaveForm: () => this.saveForm(),
+      onBuscarPtax: () => this.buscarPtax(),
+      // sync
+      syncDot, syncPillText, syncPillBg, syncPillBorder,
+      spinAnim: this.state.syncing ? 'spin 1s linear infinite' : 'none',
+      connected: this.state.connected,
+      onSync: () => { this.pullFromSheet(false); this.refreshQuotes(); },
+      onOpenConnect: () => this.setState({ showConnect: true, sheetUrlInput: this.state.sheetUrl, connMsg: '', connState: '' }),
+      onCloseConnect: () => this.setState({ showConnect: false }),
+      showConnect: this.state.showConnect,
+      sheetUrlInput: this.state.sheetUrlInput,
+      onSheetUrlChange: (e) => this.setState({ sheetUrlInput: e.target.value }),
+      onSaveConnection: () => this.saveConnection(),
+      onDisconnect: () => this.disconnect(),
+      autoSync: this.state.autoSync,
+      onToggleAutoSync: (e) => this.setState({ autoSync: e.target.checked }, () => this.persist()),
+      appsScriptCode: this.APPS_SCRIPT,
+      copyLabel: this.state.copyLabel,
+      onCopyCode: () => this.copyCode(),
+      connMsg: this.state.connMsg,
+      connMsgBg: connOk ? '#ECFDF3' : connErr ? '#FEF3F2' : '#F2F4F7',
+      connMsgBorder: connOk ? '#A6F4C5' : connErr ? '#FDA29B' : '#E4E7EC',
+      connMsgColor: connOk ? '#027A48' : connErr ? '#B42318' : '#344054',
+    };
+  }
+
+  // ---------- actions ----------
+  setForm(k, v) { this.setState(s => ({ form: { ...s.form, [k]: v } })); }
+
+  openForm(op) {
+    if (op) {
+      this.setState({ showForm: true, form: { editId: op.id, editAba: op.aba || null, tipoInvest: op.tipoInvest, operacao: op.operacao, corretora: op.corretora || '', ativo: op.ativo || '', data: op.data, quantidade: op.quantidade, valorCota: op.valorCota, taxas: op.taxas, ptax: op.ptax || '' } });
+    } else {
+      this.setState({ showForm: true, form: this.blankForm() });
+    }
+  }
+
+  buildOpFromForm() {
+    const f = this.state.form;
+    const moeda = (this.cats[f.tipoInvest] || {}).moeda || 'BRL';
+    const q = parseFloat((f.quantidade + '').replace(',', '.')) || 0;
+    const vc = parseFloat((f.valorCota + '').replace(',', '.')) || 0;
+    const tx = parseFloat((f.taxas + '').replace(',', '.')) || 0;
+    let total;
+    if (f.operacao === 'PROVENTO') total = vc || q * vc;
+    else total = f.operacao === 'VENDA' ? q * vc - tx : q * vc + tx;
+    const ptax = moeda === 'USD' ? (parseFloat((f.ptax + '').replace(',', '.')) || this.state.usdBrl) : null;
+    const valorTotalBRL = moeda === 'USD' ? total * (ptax || this.state.usdBrl) : total;
+    return { tipoInvest: f.tipoInvest, operacao: f.operacao, corretora: f.corretora, ativo: f.ativo.toUpperCase().trim(),
+      data: f.data, quantidade: q, valorCota: vc, taxas: tx, valorTotal: total, valorTotalBRL, moeda, ptax };
+  }
+
+  async saveForm() {
+    const f = this.state.form;
+    if (!f.ativo || !f.ativo.trim()) { alert('Informe o ativo.'); return; }
+    const base = this.buildOpFromForm();
+
+    if (this.state.sheetUrl) {
+      const aba = f.editAba || this.abaForMoeda(base.moeda);
+      const cells = this.buildCells(aba, base);
+      const op = { ...base, id: f.editId, tipo: base.tipoInvest };
+      this.setState({ showForm: false, syncing: true, msg: 'Salvando na planilha...' });
+      const payload = f.editId ? { action: 'update', id: f.editId, aba, cells, op } : { action: 'add', aba, cells, op };
+      try {
+        const j = await this.sheetPost(payload);
+        if (!j || !j.ok) throw new Error((j && j.error) || 'Falha na planilha');
+        const ops = this.ingest(j.rows || []);
+        this.setState({ ops, syncing: false, connected: true, lastSync: new Date().toLocaleTimeString('pt-BR').slice(0, 5), msg: f.editId ? 'Atualizado na planilha' : 'Adicionado na planilha' }, () => { this.persist(); this.flashMsg(); });
+      } catch (err) {
+        this.setState({ syncing: false, msg: 'Erro ao salvar: ' + err.message }); this.flashMsg();
+      }
+    } else {
+      const op = { ...base, id: f.editId || Math.random().toString(36).slice(2, 9) };
+      this.setState(s => {
+        const ops = f.editId ? s.ops.map(o => o.id === f.editId ? op : o) : [...s.ops, op];
+        return { ops, showForm: false, msg: f.editId ? 'Lançamento atualizado' : 'Lançamento adicionado' };
+      }, () => { this.persist(); this.flashMsg(); });
+    }
+  }
+
+  async deleteOp(id) {
+    if (!confirm('Excluir este lançamento?')) return;
+    if (this.state.sheetUrl) {
+      this.setState({ syncing: true, msg: 'Excluindo na planilha...' });
+      try {
+        const j = await this.sheetPost({ action: 'delete', id });
+        if (!j || !j.ok) throw new Error((j && j.error) || 'Falha');
+        const ops = this.ingest(j.rows || []);
+        this.setState({ ops, syncing: false, msg: 'Excluído na planilha' }, () => { this.persist(); this.flashMsg(); });
+      } catch (err) {
+        this.setState({ syncing: false, msg: 'Erro ao excluir: ' + err.message }); this.flashMsg();
+      }
+    } else {
+      this.setState(s => ({ ops: s.ops.filter(o => o.id !== id) }), () => this.persist());
+    }
+  }
+
+  updateQuote(ticker, val) {
+    this.setState(s => ({ quotes: { ...s.quotes, [ticker.toUpperCase()]: val } }), () => this.persist());
+  }
+
+  flashMsg() { setTimeout(() => this.setState({ msg: '' }), 2800); }
+
+  // ---------- Google Sheets sync ----------
+  ingest(rows) {
+    const info = {};
+    (rows || []).forEach(r => {
+      const aba = r._aba || r.aba;
+      if (aba && !info[aba]) {
+        info[aba] = { moeda: /u\$|us\$|usd|dolar|dólar|exterior/.test(this.norm(aba)) ? 'USD' : 'BRL',
+          headers: Object.keys(r).filter(k => k[0] !== '_' && k !== 'aba' && k !== 'moeda') };
+      }
+    });
+    this.tabInfo = info;
+    return (rows || []).map(r => (r._id !== undefined && !('valorTotal' in r)) ? this.mapRowRaw(r) : this.mapRow(r));
+  }
+
+  rawGet(raw, names) {
+    const keys = Object.keys(raw).filter(k => k[0] !== '_');
+    for (const nm of names) { const kn = this.norm(nm); for (const k of keys) if (this.norm(k) === kn) return raw[k]; }
+    for (const nm of names) { const kn = this.norm(nm); if (kn.length < 4) continue; for (const k of keys) if (this.norm(k).indexOf(kn) > -1) return raw[k]; }
+    return '';
+  }
+
+  mapRowRaw(raw) {
+    const aba = this.norm(raw._aba || '');
+    const moeda = /u\$|us\$|usd|dolar|dólar|exterior/.test(aba) ? 'USD' : 'BRL';
+    const ativo = (this.rawGet(raw, ['Ativo', 'Ticker', 'Papel', 'Codigo']) + '').toUpperCase().trim();
+    const inferred = this.inferTipo(ativo);
+    const tipoStr = this.rawGet(raw, ['Tipo', 'Classe', 'Categoria']);
+    const tipo = (tipoStr && this.cats[tipoStr]) ? tipoStr : this.mapTipoStr(tipoStr, inferred, moeda);
+    const operacao = this.detectOp(this.rawGet(raw, ['Operação', 'Operacao', 'Op']));
+    const totalNative = this.parseNum(this.rawGet(raw, ['Valor Total U$', 'Valor Total US$', 'Valor Total', 'Total', 'Financeiro']));
+    const totalBRL = this.parseNum(this.rawGet(raw, ['Valor em Real', 'Valor Total R$', 'Total R$', 'Valor em Reais']));
+    const cota = this.parseNum(this.rawGet(raw, ['Valor Cota', 'Valor da Cota', 'Preço Médio', 'Preco', 'Cotação']));
+    const taxas = this.parseNum(this.rawGet(raw, ['Taxas', 'Taxa', 'Custos']));
+    let ptax = (moeda === 'USD' && totalBRL > 0 && totalNative > 0) ? totalBRL / totalNative : this.parseNum(this.rawGet(raw, ['U$ PTAX', 'PTAX', 'Dólar', 'Câmbio']));
+    if (moeda === 'USD' && !ptax) ptax = this.state.usdBrl;
+    return { id: raw._id, aba: raw._aba, tipoInvest: tipo, operacao, corretora: this.rawGet(raw, ['Corretora', 'Broker', 'Instituição']) || '',
+      ativo, data: this.parseDate(this.rawGet(raw, ['Data', 'Date'])), quantidade: this.parseNum(this.rawGet(raw, ['Quant.', 'Quant', 'Quantidade', 'Qtd'])),
+      valorCota: cota, taxas, valorTotal: totalNative, valorTotalBRL: totalBRL, moeda, ptax: moeda === 'USD' ? ptax : null };
+  }
+
+  abaForMoeda(moeda) {
+    const names = Object.keys(this.tabInfo || {});
+    for (const n of names) if (this.tabInfo[n].moeda === moeda) return n;
+    return names[0] || null;
+  }
+  opLabel(op) { return ({ COMPRA: 'Compra', VENDA: 'Venda', PROVENTO: 'Provento' })[op] || op; }
+  tipoSheet(t) { return ({ 'Ações BR': 'Ações', 'FIIs': 'FII', 'Renda Fixa': 'Renda Fixa', 'Stocks EUA': 'Stocks', 'Cripto': 'Cripto' })[t] || t; }
+
+  buildCells(aba, op) {
+    const info = this.tabInfo[aba];
+    const headers = (info && info.headers && info.headers.length) ? info.headers : ['Corretora', 'Operação', 'Tipo', 'Ativo', 'Data', 'Quant.', 'Valor Cota', 'Taxas', 'Valor Total'];
+    const cells = {};
+    const val = (role) => {
+      switch (role) {
+        case 'corretora': return op.corretora;
+        case 'ativo': return op.ativo;
+        case 'operacao': return this.opLabel(op.operacao);
+        case 'tipo': return this.tipoSheet(op.tipoInvest);
+        case 'data': return op.data;
+        case 'quant': return op.quantidade;
+        case 'ptax': return op.ptax;
+        case 'totalBRL': return op.valorTotalBRL;
+        case 'totalUSD': return op.valorTotal;
+        case 'totalNative': return op.valorTotal;
+        case 'cota': return op.valorCota;
+        case 'taxas': return op.taxas;
+      }
+      return undefined;
+    };
+    headers.forEach(h => {
+      const n = this.norm(h);
+      let role = null;
+      if (n.indexOf('corretora') > -1 || n.indexOf('broker') > -1) role = 'corretora';
+      else if (n === 'ativo' || n.indexOf('ticker') > -1 || n.indexOf('papel') > -1) role = 'ativo';
+      else if (n.indexOf('operac') > -1) role = 'operacao';
+      else if (n === 'tipo' || n.indexOf('classe') > -1 || n.indexOf('categoria') > -1) role = 'tipo';
+      else if (n.indexOf('data') > -1) role = 'data';
+      else if (n.indexOf('quant') > -1) role = 'quant';
+      else if (n.indexOf('ptax') > -1 || n.indexOf('dolar') > -1 || n.indexOf('cambio') > -1) role = 'ptax';
+      else if (n.indexOf('valor em real') > -1 || n.indexOf('total r$') > -1 || n.indexOf('em reais') > -1) role = 'totalBRL';
+      else if (n.indexOf('valor total u') > -1) role = 'totalUSD';
+      else if (n === 'valor total' || n === 'total' || n.indexOf('financeiro') > -1) role = 'totalNative';
+      else if (n.indexOf('preco medio') > -1) role = 'cota';
+      else if (n.indexOf('valor cota') > -1 || n.indexOf('valor da cota') > -1 || n === 'preco' || n.indexOf('cotac') > -1) role = 'cota';
+      else if (n.indexOf('taxa') > -1) role = 'taxas';
+      if (!role) return;
+      const v = val(role);
+      if (v !== undefined && v !== null && v !== '') cells[h] = v;
+    });
+    return cells;
+  }
+
+  mapTipoStr(s, inferred, moeda) {
+    const n = this.norm(s);
+    if (/fii|imobiliar/.test(n)) return 'FIIs';
+    if (/renda fixa|tesouro|cdb|lci|lca|debent/.test(n)) return 'Renda Fixa';
+    if (/cripto|crypto|bitcoin/.test(n)) return 'Cripto';
+    if (/stock|eua|reit|nasdaq|nyse|exterior/.test(n)) return 'Stocks EUA';
+    if (/etf/.test(n)) return moeda === 'USD' ? 'Stocks EUA' : inferred;
+    if (n.indexOf('aco') > -1 || n.indexOf('acao') > -1) return moeda === 'USD' ? 'Stocks EUA' : 'Ações BR';
+    return inferred;
+  }
+
+  mapRow(row) {
+    const inferred = this.inferTipo(row.ativo);
+    // A MOEDA é decidida pelo NOME DA ABA (conector envia "aba" em cada linha):
+    // abas com u$ / us$ / usd / dólar => USD; as demais (inclui cripto) => BRL.
+    const abaStr = this.norm(row.aba || '');
+    let moeda;
+    if (abaStr) moeda = /u\$|us\$|usd|dolar|dólar|exterior/.test(abaStr) ? 'USD' : 'BRL';
+    else moeda = row.moeda || (this.cats[inferred] || {}).moeda || 'BRL';
+    const tipo = (row.tipo && this.cats[row.tipo]) ? row.tipo : this.mapTipoStr(row.tipo, inferred, moeda);
+    const operacao = this.detectOp(row.operacao);
+    const totalNative = this.parseNum(row.valorTotal);
+    const totalBRL = this.parseNum(row.valorTotalBRL);
+    let ptax = this.parseNum(row.ptax);
+    if (moeda === 'USD' && !ptax) ptax = (totalBRL > 0 && totalNative > 0) ? totalBRL / totalNative : this.state.usdBrl;
+    return { id: row.id, tipoInvest: tipo, operacao, corretora: row.corretora || '', ativo: (row.ativo || '').toUpperCase().trim(),
+      data: this.parseDate(row.data), quantidade: this.parseNum(row.quantidade), valorCota: this.parseNum(row.valorCota),
+      taxas: this.parseNum(row.taxas), valorTotal: totalNative, valorTotalBRL: totalBRL, moeda, ptax: moeda === 'USD' ? ptax : null };
+  }
+
+  sheetGet(url) { return fetch(url || this.state.sheetUrl).then(r => r.json()); }
+  sheetPost(payload) {
+    return fetch(this.state.sheetUrl, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }).then(r => r.json());
+  }
+
+  async gvizFetch(name) {
+    const url = 'https://docs.google.com/spreadsheets/d/' + this.SHEET_ID + '/gviz/tq?tqx=out:json&sheet=' + encodeURIComponent(name) + '&t=' + Date.now();
+    const t = await (await fetch(url)).text();
+    const m = t.match(/setResponse\(([\s\S]*)\);?\s*$/);
+    if (!m) throw new Error('gviz resposta inválida para ' + name);
+    const j = JSON.parse(m[1]);
+    const cols = (j.table.cols || []).map(c => String(c.label || '').trim());
+    const rows = [];
+    (j.table.rows || []).forEach(rw => {
+      const cs = rw.c || [];
+      const obj = { _aba: name };
+      for (let i = 0; i < cols.length; i++) {
+        const h = cols[i]; if (!h || h in obj) continue;
+        const c = cs[i];
+        let v = c ? (c.v != null ? c.v : '') : '';
+        if (typeof v === 'string') { const dm = v.match(/^Date\((\d+),(\d+),(\d+)/); if (dm) v = dm[1] + '-' + String(+dm[2] + 1).padStart(2, '0') + '-' + String(+dm[3]).padStart(2, '0'); }
+        obj[h] = v;
+      }
+      if (String(obj['Ativo'] || '').trim() === '') return;
+      obj._id = String(obj['ID'] || obj['Id'] || '').trim();
+      rows.push(obj);
+    });
+    return rows;
+  }
+
+  async tabNames() {
+    if (this.state.sheetUrl) {
+      try {
+        const jm = await (await fetch(this.state.sheetUrl + '?meta=1&t=' + Date.now())).json();
+        if (jm && jm.abas && jm.abas.length) { const t = jm.abas.filter(a => a.temAtivo !== false).map(a => a.nome); if (t.length) return t; }
+      } catch (e) {}
+    }
+    return this.KNOWN_TABS;
+  }
+
+  async pullFromSheet(silent) {
+    if (!silent) this.setState({ syncing: true, msg: 'Sincronizando planilha...' });
+    else this.setState({ syncing: true });
+    try {
+      const tabs = await this.tabNames();
+      let raw = [];
+      for (const nm of tabs) { try { const rows = await this.gvizFetch(nm); raw = raw.concat(rows); } catch (e) {} }
+      if (!raw.length) throw new Error('Não consegui ler as abas (confira se está logada na conta do Google dona da planilha).');
+      const ops = this.ingest(raw);
+      this.setState({ ops, connected: true, syncing: false, lastSync: new Date().toLocaleTimeString('pt-BR').slice(0, 5), msg: silent ? this.state.msg : 'Planilha sincronizada (' + ops.length + ' lançamentos)' }, () => { this.persist(); if (!silent) this.flashMsg(); });
+    } catch (err) {
+      this.setState({ syncing: false, msg: silent ? this.state.msg : 'Erro: ' + err.message });
+      if (!silent) this.flashMsg();
+    }
+  }
+
+  async saveConnection() {
+    const url = (this.state.sheetUrlInput || '').trim();
+    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(url)) {
+      this.setState({ connMsg: 'URL inválida. Deve terminar em /exec (App da Web do Apps Script).', connState: 'err' });
+      return;
+    }
+    this.setState({ sheetUrl: url, connMsg: 'Lendo planilha...', connState: '' }, () => this.persist());
+    await this.pullFromSheet(false);
+    const n = (this.state.ops || []).length;
+    if (n > 0) this.setState({ connState: 'ok', connMsg: 'Conectado! ' + n + ' lançamentos lidos da planilha.' });
+    else this.setState({ connState: 'err', connMsg: 'Conectei, mas não li lançamentos. Confira se está logada na conta dona da planilha.' });
+  }
+
+  disconnect() {
+    this.setState({ sheetUrl: '', connected: false, connMsg: 'Desconectado. Os dados agora ficam apenas neste navegador.', connState: '' }, () => this.persist());
+  }
+
+  copyCode() {
+    try {
+      navigator.clipboard.writeText(this.APPS_SCRIPT);
+      this.setState({ copyLabel: 'Copiado ✓' });
+      setTimeout(() => this.setState({ copyLabel: 'Copiar código' }), 2000);
+    } catch (e) {
+      this.setState({ copyLabel: 'Copie manualmente abaixo' });
+    }
+  }
+
+  // ---------- PTAX / cotações ----------
+  async fetchPtaxFor(dateStr) {
+    for (let i = 0; i < 7; i++) {
+      const dt = new Date(dateStr + 'T12:00:00');
+      dt.setDate(dt.getDate() - i);
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      const yy = dt.getFullYear();
+      const url = "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao='" + mm + "-" + dd + "-" + yy + "'&$top=1&$format=json";
+      try {
+        const r = await fetch(url);
+        const j = await r.json();
+        if (j && j.value && j.value.length) return j.value[0].cotacaoVenda;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  async buscarPtax() {
+    const dateStr = this.state.form.data;
+    this.setState({ msg: 'Buscando PTAX...' });
+    const v = await this.fetchPtaxFor(dateStr);
+    if (v) { this.setForm('ptax', v); this.setState({ msg: 'PTAX ' + this.fmt(v) }); this.flashMsg(); }
+    else { this.setState({ msg: 'PTAX indisponível' }); this.flashMsg(); }
+  }
+
+  async refreshQuotes() {
+    const cgMap = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', ADA: 'cardano', BNB: 'binancecoin', XRP: 'ripple', DOGE: 'dogecoin', LTC: 'litecoin', MATIC: 'matic-network', DOT: 'polkadot' };
+    const tickers = Object.keys(this.getData().positions.reduce((a, p) => (a[p.ticker] = 1, a), {}));
+    const updates = {};
+    const cids = tickers.filter(t => cgMap[t]).map(t => cgMap[t]);
+    if (cids.length) {
+      try {
+        const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + cids.join(',') + '&vs_currencies=usd');
+        const j = await r.json();
+        tickers.forEach(t => { if (cgMap[t] && j[cgMap[t]]) updates[t] = j[cgMap[t]].usd; });
+      } catch (e) {}
+    }
+    const brTickers = tickers.filter(t => /^[A-Z]{4}\d{1,2}$/.test(t));
+    for (const t of brTickers) {
+      try {
+        const r = await fetch('https://brapi.dev/api/quote/' + t);
+        const j = await r.json();
+        if (j && j.results && j.results[0] && j.results[0].regularMarketPrice) updates[t] = j.results[0].regularMarketPrice;
+      } catch (e) {}
+    }
+    const px = await this.fetchPtaxFor(new Date().toISOString().slice(0, 10));
+    this.setState(s => ({ quotes: { ...s.quotes, ...updates }, usdBrl: px || s.usdBrl }), () => this.persist());
+  }
+
+  // ---------- Apps Script source (shown in the connect modal) ----------
+  buildAppsScriptV3() {
+    return `/**
+ * Conector Google Sheets <-> Dashboard de Investimentos (v3 - modo BRUTO)
+ * Le todas as abas com coluna "Ativo" e envia as linhas cruas (o app entende as colunas).
+ * So cria a coluna "ID". Instalar: Extensoes > Apps Script > colar > salvar >
+ *   Implantar > Nova implantacao > App da Web (Executar como: Eu | Acesso: Qualquer pessoa) > copiar URL /exec.
+ */
+var TABS_USD=['dolar','dolar','usd','us$','u$','dollar','exterior'];
+function norm(s){return String(s).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim();}
+function isUsdTab(name){var n=norm(name);return TABS_USD.some(function(k){return n.indexOf(norm(k))>-1;});}
+function headerMap(sheet){var lc=Math.max(sheet.getLastColumn(),1);var hs=sheet.getRange(1,1,1,lc).getValues()[0];var m={};for(var i=0;i<hs.length;i++){var h=String(hs[i]).trim();if(h!==''&&!(h in m))m[h]=i;}return m;}
+function colByNorm(m,w){for(var h in m)if(norm(h)===w)return m[h];return -1;}
+function ativoCol(m){var a=colByNorm(m,'ativo');if(a>-1)return a;var t=colByNorm(m,'ticker');if(t>-1)return t;return colByNorm(m,'papel');}
+function idCol(m){return colByNorm(m,'id');}
+function ensureId(sheet){var m=headerMap(sheet);if(idCol(m)>-1)return idCol(m);var lc=sheet.getLastColumn()+1;sheet.getRange(1,lc).setValue('ID');return lc-1;}
+function dataSheets(){return SpreadsheetApp.getActiveSpreadsheet().getSheets().filter(function(sh){return ativoCol(headerMap(sh))>-1;});}
+function fmtDate(v){if(v instanceof Date)return Utilities.formatDate(v,Session.getScriptTimeZone(),'yyyy-MM-dd');return v;}
+function readAll(){var out=[];dataSheets().forEach(function(sheet){var idc=ensureId(sheet);var lc=sheet.getLastColumn(),lastRow=sheet.getLastRow();var headers=sheet.getRange(1,1,1,lc).getValues()[0].map(function(h){return String(h).trim();});var ac=ativoCol(headerMap(sheet));var moeda=isUsdTab(sheet.getName())?'USD':'BRL';if(lastRow<2)return;var data=sheet.getRange(2,1,lastRow-1,lc).getValues();for(var r=0;r<data.length;r++){var row=data[r];if(ac<0||String(row[ac]).trim()==='')continue;var id=idc>-1?String(row[idc]).trim():'';if(id===''){id='r'+(new Date().getTime())+Math.floor(Math.random()*100000);if(idc>-1)sheet.getRange(r+2,idc+1).setValue(id);}var obj={_aba:sheet.getName(),_moeda:moeda,_id:id};for(var c=0;c<headers.length;c++){var h=headers[c];if(h===''||h in obj)continue;obj[h]=fmtDate(row[c]);}out.push(obj);}});return{ok:true,rows:out};}
+function writeCells(sheet,rowNum,cells){var m=headerMap(sheet);Object.keys(cells).forEach(function(h){var col=(h in m)?m[h]:colByNorm(m,norm(h));if(col<0)return;var v=cells[h];if(norm(h).indexOf('data')>-1&&typeof v==='string'&&/^\\d{4}-\\d{2}-\\d{2}/.test(v))v=new Date(v+'T12:00:00');sheet.getRange(rowNum,col+1).setValue(v);});}
+function firstEmpty(sheet,ac){var lastRow=sheet.getLastRow();if(ac>-1&&lastRow>=2){var col=sheet.getRange(2,ac+1,lastRow-1,1).getValues();for(var i=0;i<col.length;i++)if(String(col[i][0]).trim()==='')return i+2;}return lastRow+1;}
+function sheetByName(name){var ss=SpreadsheetApp.getActiveSpreadsheet();return (name&&ss.getSheetByName(name))||dataSheets()[0];}
+function addRow(req){var sheet=sheetByName(req.aba);var idc=ensureId(sheet);var ac=ativoCol(headerMap(sheet));var rowNum=firstEmpty(sheet,ac);var id='r'+(new Date().getTime())+Math.floor(Math.random()*100000);if(idc>-1)sheet.getRange(rowNum,idc+1).setValue(id);writeCells(sheet,rowNum,req.cells||{});}
+function locate(id){var sheets=dataSheets();for(var s=0;s<sheets.length;s++){var idc=idCol(headerMap(sheets[s]));if(idc<0)continue;var lastRow=sheets[s].getLastRow();if(lastRow<2)continue;var col=sheets[s].getRange(2,idc+1,lastRow-1,1).getValues();for(var i=0;i<col.length;i++)if(String(col[i][0])===String(id))return{sheet:sheets[s],row:i+2};}return null;}
+function updateRow(req){var loc=locate(req.id);if(!loc){addRow(req);return;}writeCells(loc.sheet,loc.row,req.cells||{});}
+function deleteRow(id){var loc=locate(id);if(loc)loc.sheet.getRange(loc.row,1,1,loc.sheet.getLastColumn()).clearContent();}
+function meta(){return{ok:true,abas:SpreadsheetApp.getActiveSpreadsheet().getSheets().map(function(sh){var m=headerMap(sh);return{nome:sh.getName(),moeda:isUsdTab(sh.getName())?'USD':'BRL',colunas:Object.keys(m),temAtivo:ativoCol(m)>-1};})};}
+function json(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
+function doGet(e){if(e&&e.parameter&&e.parameter.meta)return json(meta());return json(readAll());}
+function doPost(e){try{var req=JSON.parse(e.postData.contents);if(req.action==='add')addRow(req);else if(req.action==='update')updateRow(req);else if(req.action==='delete')deleteRow(req.id);return json(readAll());}catch(err){return json({ok:false,error:String(err)});}}`;
+  }
+
+  buildAppsScriptV2() {
+    return `/**
+ * Conector Google Sheets <-> Dashboard de Investimentos  (v2 - multiplas abas)
+ * Le TODAS as abas que tiverem uma coluna "Ativo".
+ * Abas cujo NOME contem dolar / dolar / usd / us$ = investimentos em DOLAR.
+ * ATUALIZAR: Extensoes > Apps Script > colar > salvar >
+ *   Implantar > Gerenciar implantacoes > (lapis) > Versao: Nova versao > Implantar.
+ */
+var TABS_USD = ['dolar','dolar','usd','us$','u$','dollar','exterior'];
+var COL = {
+  id:['ID','Id'], corretora:['Corretora','Broker','Instituicao'],
+  ativo:['Ativo','Ticker','Papel','Codigo'], data:['Data','Date'],
+  operacao:['Operacao','Op','Movimento'], quantidade:['Quant.','Quant','Quantidade','Qtd'],
+  valorCota:['Valor Cota','Valor da Cota','Preco Medio','Preco','Cotacao'],
+  taxas:['Taxas','Taxa','Custos'],
+  valorTotal:['Valor Total U$','Valor Total US$','Valor Total','Total','Financeiro'],
+  valorTotalBRL:['Valor em Real','Valor Total R$','Total R$','Valor em Reais','Convertido'],
+  tipo:['Tipo','Classe','Categoria'], ptax:['PTAX','Dolar','Cambio','Cotacao Dolar']
+};
+function norm(s){return String(s).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim();}
+function isUsdTab(name){var n=norm(name);return TABS_USD.some(function(k){return n.indexOf(norm(k))>-1;});}
+function headerIndex(sheet,create){var lastCol=Math.max(sheet.getLastColumn(),1);var hdr=sheet.getRange(1,1,1,lastCol).getValues()[0];var by={};hdr.forEach(function(h,i){if(String(h).trim()!=='')by[norm(h)]=i;});var idx={};Object.keys(COL).forEach(function(k){idx[k]=-1;COL[k].some(function(nm){var kk=norm(nm);if(kk in by){idx[k]=by[kk];return true;}return false;});if(idx[k]<0){COL[k].some(function(nm){var kk=norm(nm);if(kk.length<4)return false;for(var hk in by){if(hk.indexOf(kk)>-1){idx[k]=by[hk];return true;}}return false;});}});if(create&&idx.ativo>-1){['id','tipo','ptax'].forEach(function(k){if(idx[k]<0){lastCol+=1;sheet.getRange(1,lastCol).setValue(COL[k][0]);idx[k]=lastCol-1;}});}return idx;}
+function dataSheets(){return SpreadsheetApp.getActiveSpreadsheet().getSheets().filter(function(sh){return headerIndex(sh,false).ativo>-1;});}
+function fmtDate(v){if(v instanceof Date)return Utilities.formatDate(v,Session.getScriptTimeZone(),'yyyy-MM-dd');return String(v||'');}
+function readAll(){var rows=[];dataSheets().forEach(function(sheet){var idx=headerIndex(sheet,true);var moeda=isUsdTab(sheet.getName())?'USD':'BRL';var lastRow=sheet.getLastRow();if(lastRow<2)return;var data=sheet.getRange(2,1,lastRow-1,sheet.getLastColumn()).getValues();for(var r=0;r<data.length;r++){var row=data[r];var ativo=idx.ativo>-1?row[idx.ativo]:'';if(String(ativo).trim()==='')continue;var id=idx.id>-1?row[idx.id]:'';if(String(id).trim()===''){id='r'+(new Date().getTime())+Math.floor(Math.random()*100000);sheet.getRange(r+2,idx.id+1).setValue(id);}rows.push({id:String(id),aba:sheet.getName(),moeda:moeda,corretora:idx.corretora>-1?row[idx.corretora]:'',ativo:String(ativo).toUpperCase().trim(),data:idx.data>-1?fmtDate(row[idx.data]):'',operacao:idx.operacao>-1?row[idx.operacao]:'',quantidade:idx.quantidade>-1?row[idx.quantidade]:'',valorCota:idx.valorCota>-1?row[idx.valorCota]:'',taxas:idx.taxas>-1?row[idx.taxas]:'',valorTotal:idx.valorTotal>-1?row[idx.valorTotal]:'',valorTotalBRL:idx.valorTotalBRL>-1?row[idx.valorTotalBRL]:'',tipo:idx.tipo>-1?row[idx.tipo]:'',ptax:idx.ptax>-1?row[idx.ptax]:''});}});return{ok:true,rows:rows};}
+function writeRow(sheet,idx,rowNum,op){function set(k,v){if(idx[k]>-1&&v!==undefined&&v!==null&&v!=='')sheet.getRange(rowNum,idx[k]+1).setValue(v);}set('corretora',op.corretora);set('ativo',op.ativo);if(idx.data>-1&&op.data)sheet.getRange(rowNum,idx.data+1).setValue(new Date(op.data+'T12:00:00'));set('operacao',op.operacao);set('quantidade',op.quantidade);set('valorCota',op.valorCota);set('taxas',op.taxas);set('valorTotal',op.valorTotal);set('valorTotalBRL',op.valorTotalBRL);set('tipo',op.tipo);set('ptax',op.ptax);}
+function targetSheet(moeda){var sheets=dataSheets();var wantUsd=(moeda==='USD');for(var i=0;i<sheets.length;i++)if(isUsdTab(sheets[i].getName())===wantUsd)return sheets[i];return sheets[0];}
+function firstEmptyRow(sheet,idx){var lastRow=sheet.getLastRow();if(idx.ativo>-1&&lastRow>=2){var col=sheet.getRange(2,idx.ativo+1,lastRow-1,1).getValues();for(var i=0;i<col.length;i++)if(String(col[i][0]).trim()==='')return i+2;}return lastRow+1;}
+function addRow(op){var sheet=targetSheet(op.moeda);var idx=headerIndex(sheet,true);var rowNum=firstEmptyRow(sheet,idx);var id='r'+(new Date().getTime())+Math.floor(Math.random()*100000);if(idx.id>-1)sheet.getRange(rowNum,idx.id+1).setValue(id);writeRow(sheet,idx,rowNum,op);}
+function locate(id){var sheets=dataSheets();for(var s=0;s<sheets.length;s++){var idx=headerIndex(sheets[s],true);if(idx.id<0)continue;var lastRow=sheets[s].getLastRow();if(lastRow<2)continue;var col=sheets[s].getRange(2,idx.id+1,lastRow-1,1).getValues();for(var i=0;i<col.length;i++)if(String(col[i][0])===String(id))return{sheet:sheets[s],idx:idx,row:i+2};}return null;}
+function updateRow(op){var loc=locate(op.id);if(!loc){addRow(op);return;}writeRow(loc.sheet,loc.idx,loc.row,op);}
+function deleteRow(id){var loc=locate(id);if(loc)loc.sheet.getRange(loc.row,1,1,loc.sheet.getLastColumn()).clearContent();}
+function meta(){return{ok:true,abas:SpreadsheetApp.getActiveSpreadsheet().getSheets().map(function(sh){var lc=Math.max(sh.getLastColumn(),1);return{nome:sh.getName(),moeda:isUsdTab(sh.getName())?'USD':'BRL',colunas:sh.getRange(1,1,1,lc).getValues()[0],temAtivo:headerIndex(sh,false).ativo>-1};})};}
+function json(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
+function doGet(e){if(e&&e.parameter&&e.parameter.meta)return json(meta());return json(readAll());}
+function doPost(e){try{var req=JSON.parse(e.postData.contents);if(req.action==='add')addRow(req.op);else if(req.action==='update')updateRow(req.op);else if(req.action==='delete')deleteRow(req.id);return json(readAll());}catch(err){return json({ok:false,error:String(err)});}}`;
+  }
+
+  buildAppsScript() {
+    return [
+      "// Conector Google Sheets <-> Dashboard de Investimentos",
+      "// Cole em: Extensoes > Apps Script. Depois: Implantar > App da Web",
+      "// (Executar como: Eu | Acesso: Qualquer pessoa) e copie a URL /exec.",
+      "",
+      "var SHEET_NAME = '';   // '' = primeira aba",
+      "var COL = {",
+      "  id:['ID','Id'], corretora:['Corretora','Broker'], ativo:['Ativo','Ticker','Papel'],",
+      "  data:['Data'], operacao:['Operação','Operacao','Op'],",
+      "  quantidade:['Quant.','Quant','Quantidade','Qtd'],",
+      "  valorCota:['Valor Cota','Preço','Preco','Cotação'],",
+      "  taxas:['Taxas','Taxa'], valorTotal:['Valor Total','Total'],",
+      "  tipo:['Tipo','Classe'], ptax:['PTAX','Dólar','Dolar']",
+      "};",
+      "function getSheet(){var ss=SpreadsheetApp.getActiveSpreadsheet();return SHEET_NAME?ss.getSheetByName(SHEET_NAME):ss.getSheets()[0];}",
+      "function norm(s){return String(s).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim();}",
+      "function headerIndex(sheet){var lastCol=Math.max(sheet.getLastColumn(),1);var hdr=sheet.getRange(1,1,1,lastCol).getValues()[0];var by={};hdr.forEach(function(h,i){if(String(h).trim()!=='')by[norm(h)]=i;});var idx={};Object.keys(COL).forEach(function(k){idx[k]=-1;COL[k].some(function(nm){var kk=norm(nm);if(kk in by){idx[k]=by[kk];return true;}return false;});});['id','tipo','ptax'].forEach(function(k){if(idx[k]<0){lastCol+=1;sheet.getRange(1,lastCol).setValue(COL[k][0]);idx[k]=lastCol-1;}});return idx;}",
+      "function fmtDate(v){if(v instanceof Date)return Utilities.formatDate(v,Session.getScriptTimeZone(),'yyyy-MM-dd');return String(v||'');}",
+      "function readAll(){var sheet=getSheet();var idx=headerIndex(sheet);var lastRow=sheet.getLastRow();var rows=[];if(lastRow>=2){var data=sheet.getRange(2,1,lastRow-1,sheet.getLastColumn()).getValues();for(var r=0;r<data.length;r++){var row=data[r];var ativo=idx.ativo>-1?row[idx.ativo]:'';if(String(ativo).trim()==='')continue;var id=idx.id>-1?row[idx.id]:'';if(String(id).trim()===''){id='r'+(new Date().getTime())+Math.floor(Math.random()*1000);sheet.getRange(r+2,idx.id+1).setValue(id);}rows.push({id:String(id),corretora:idx.corretora>-1?row[idx.corretora]:'',ativo:String(ativo).toUpperCase().trim(),data:idx.data>-1?fmtDate(row[idx.data]):'',operacao:idx.operacao>-1?row[idx.operacao]:'',quantidade:idx.quantidade>-1?row[idx.quantidade]:'',valorCota:idx.valorCota>-1?row[idx.valorCota]:'',taxas:idx.taxas>-1?row[idx.taxas]:'',valorTotal:idx.valorTotal>-1?row[idx.valorTotal]:'',tipo:idx.tipo>-1?row[idx.tipo]:'',ptax:idx.ptax>-1?row[idx.ptax]:''});}}return{ok:true,rows:rows};}",
+      "function writeRow(sheet,idx,rowNum,op){function set(k,v){if(idx[k]>-1&&v!==undefined&&v!==null&&v!=='')sheet.getRange(rowNum,idx[k]+1).setValue(v);}set('corretora',op.corretora);set('ativo',op.ativo);if(idx.data>-1&&op.data)sheet.getRange(rowNum,idx.data+1).setValue(new Date(op.data+'T12:00:00'));set('operacao',op.operacao);set('quantidade',op.quantidade);set('valorCota',op.valorCota);set('taxas',op.taxas);set('valorTotal',op.valorTotal);set('tipo',op.tipo);set('ptax',op.ptax);}",
+      "function firstEmptyRow(sheet,idx){var lastRow=sheet.getLastRow();if(idx.ativo>-1&&lastRow>=2){var col=sheet.getRange(2,idx.ativo+1,lastRow-1,1).getValues();for(var i=0;i<col.length;i++)if(String(col[i][0]).trim()==='')return i+2;}return lastRow+1;}",
+      "function findRowById(sheet,idx,id){if(idx.id<0)return -1;var lastRow=sheet.getLastRow();if(lastRow<2)return -1;var col=sheet.getRange(2,idx.id+1,lastRow-1,1).getValues();for(var i=0;i<col.length;i++)if(String(col[i][0])===String(id))return i+2;return -1;}",
+      "function addRow(op){var sheet=getSheet();var idx=headerIndex(sheet);var rowNum=firstEmptyRow(sheet,idx);var id='r'+(new Date().getTime())+Math.floor(Math.random()*1000);if(idx.id>-1)sheet.getRange(rowNum,idx.id+1).setValue(id);writeRow(sheet,idx,rowNum,op);}",
+      "function updateRow(op){var sheet=getSheet();var idx=headerIndex(sheet);var rowNum=findRowById(sheet,idx,op.id);if(rowNum<0){addRow(op);return;}writeRow(sheet,idx,rowNum,op);}",
+      "function deleteRow(id){var sheet=getSheet();var idx=headerIndex(sheet);var rowNum=findRowById(sheet,idx,id);if(rowNum>0)sheet.getRange(rowNum,1,1,sheet.getLastColumn()).clearContent();}",
+      "function json(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}",
+      "function doGet(e){return json(readAll());}",
+      "function doPost(e){try{var req=JSON.parse(e.postData.contents);if(req.action==='add')addRow(req.op);else if(req.action==='update')updateRow(req.op);else if(req.action==='delete')deleteRow(req.id);return json(readAll());}catch(err){return json({ok:false,error:String(err)});}}",
+    ].join("\n");
+  }
+}
+</script>
+
+
+</body></html>
