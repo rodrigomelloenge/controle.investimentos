@@ -2625,8 +2625,6 @@ class Component extends DCLogic {
     this.CRYPTO_ICON = { BTC: 'btc', ETH: 'eth', SOL: 'sol', ADA: 'ada', BNB: 'bnb', DOGE: 'doge', XRP: 'xrp', USDT: 'usdt', USDC: 'usdc', LTC: 'ltc', DOT: 'dot', LINK: 'link', AVAX: 'avax', MATIC: 'matic' };
     this.APPS_SCRIPT = this.buildAppsScriptV3();
     this.tabInfo = {};
-    this.KNOWN_TABS = ['Lançamentos R$', 'Lançamentos U$'];
-    this.SHEET_ID = '1CVacH71CdWEKdBP-LOtCl5K4Iy7nKGtF6KiyVoczUbA';
     this.state = {
       tab: 'overview',
       ops: [],
@@ -2733,6 +2731,10 @@ class Component extends DCLogic {
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
     let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
     if (m) { let y = m[3]; if (y.length === 2) y = '20' + y; return y + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
+    // formato abreviado pt-BR usado por células de Data com máscara customizada, ex: "set.-10", "abr.-26"
+    const MES_PT = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
+    let mp = this.norm(s).match(/^([a-z]{3})\.?-?(\d{2,4})$/);
+    if (mp && MES_PT[mp[1]]) { let y = mp[2]; if (y.length === 2) y = '20' + y; return y + '-' + String(MES_PT[mp[1]]).padStart(2, '0') + '-01'; }
     const dt = new Date(s); if (!isNaN(dt)) return dt.toISOString().slice(0, 10);
     return new Date().toISOString().slice(0, 10);
   }
@@ -3242,49 +3244,20 @@ class Component extends DCLogic {
     return fetch(this.state.sheetUrl, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }).then(r => r.json());
   }
 
-  async gvizFetch(name) {
-    const url = 'https://docs.google.com/spreadsheets/d/' + this.SHEET_ID + '/gviz/tq?tqx=out:json&sheet=' + encodeURIComponent(name) + '&t=' + Date.now();
-    const t = await (await fetch(url)).text();
-    const m = t.match(/setResponse\(([\s\S]*)\);?\s*$/);
-    if (!m) throw new Error('gviz resposta inválida para ' + name);
-    const j = JSON.parse(m[1]);
-    const cols = (j.table.cols || []).map(c => String(c.label || '').trim());
-    const rows = [];
-    (j.table.rows || []).forEach(rw => {
-      const cs = rw.c || [];
-      const obj = { _aba: name };
-      for (let i = 0; i < cols.length; i++) {
-        const h = cols[i]; if (!h || h in obj) continue;
-        const c = cs[i];
-        let v = c ? (c.v != null ? c.v : '') : '';
-        if (typeof v === 'string') { const dm = v.match(/^Date\((\d+),(\d+),(\d+)/); if (dm) v = dm[1] + '-' + String(+dm[2] + 1).padStart(2, '0') + '-' + String(+dm[3]).padStart(2, '0'); }
-        obj[h] = v;
-      }
-      if (String(obj['Ativo'] || '').trim() === '') return;
-      obj._id = String(obj['ID'] || obj['Id'] || '').trim();
-      rows.push(obj);
-    });
-    return rows;
-  }
-
-  async tabNames() {
-    if (this.state.sheetUrl) {
-      try {
-        const jm = await (await fetch(this.state.sheetUrl + '?meta=1&t=' + Date.now())).json();
-        if (jm && jm.abas && jm.abas.length) { const t = jm.abas.filter(a => a.temAtivo !== false).map(a => a.nome); if (t.length) return t; }
-      } catch (e) {}
-    }
-    return this.KNOWN_TABS;
-  }
+  // OBS: a leitura via docs.google.com/gviz foi removida — esse endpoint não manda
+  // Access-Control-Allow-Origin, então o fetch() é sempre bloqueado por CORS no navegador,
+  // não importa se a planilha está compartilhada corretamente. A leitura real tem que
+  // passar pelo Apps Script (/exec) conectado, via sheetGet(), que é quem de fato funciona.
 
   async pullFromSheet(silent) {
+    if (!this.state.sheetUrl) return;
     if (!silent) this.setState({ syncing: true, msg: 'Sincronizando planilha...' });
     else this.setState({ syncing: true });
     try {
-      const tabs = await this.tabNames();
-      let raw = [];
-      for (const nm of tabs) { try { const rows = await this.gvizFetch(nm); raw = raw.concat(rows); } catch (e) {} }
-      if (!raw.length) throw new Error('Não consegui ler as abas (confira se está logada na conta do Google dona da planilha).');
+      const j = await this.sheetGet(this.state.sheetUrl + '?t=' + Date.now());
+      if (!j || !j.ok) throw new Error((j && j.error) || 'Falha ao ler a planilha.');
+      const raw = j.rows || [];
+      if (!raw.length) throw new Error('A planilha respondeu, mas não trouxe nenhuma linha (confira se as abas têm uma coluna "Ativo" preenchida).');
       const ops = this.ingest(raw);
       this.setState({ ops, connected: true, syncing: false, lastSync: new Date().toLocaleTimeString('pt-BR').slice(0, 5), msg: silent ? this.state.msg : 'Planilha sincronizada (' + ops.length + ' lançamentos)' }, () => { this.persist(); if (!silent) this.flashMsg(); });
     } catch (err) {
